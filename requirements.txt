@@ -1,0 +1,17 @@
+torch
+torchvision
+pydantic
+numpy
+matplotlib
+seaborn
+einops
+jaxtyping
+tqdm
+jinja2
+dotenv
+ipykernel
+safetensors
+scipy
+scikit-learn
+litellm
+openai
