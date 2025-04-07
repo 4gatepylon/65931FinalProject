@@ -1,6 +1,7 @@
 torch
 torchvision
 pydantic
+pydantic-yaml
 numpy
 matplotlib
 seaborn
