@@ -147,7 +147,7 @@ class OpticalDotProduct(nn.Module):
         self.weights_normalization = torch.max(torch.abs(weights)).item()
         if(self.weights_normalization<=1e-9):
             self.weights_normalization=1
-        weights=(weights/self.weights_normalization)*(2**weight_quantization_bitwidth - 1)
+        weights=torch.round((weights/self.weights_normalization)*(2**weight_quantization_bitwidth - 1))
         #
 
         self.input_DAC=DAC(input_quantization_bitwidth)
