@@ -54,7 +54,7 @@ class Laser(nn.Module):
 
     def __init__(
         self,
-        optical_gain=0.1, # What the voltage is multiplied by to get the optical power.
+        optical_gain=0.2, # What the voltage is multiplied by to get the optical power.
     ):
         super().__init__()
         self.optical_gain = optical_gain
@@ -166,6 +166,14 @@ class OpticalDotProduct(nn.Module):
         self.tia_gain=tia_gain
 
     def forward(self, tensor):
+        #Software Implemented transformation
+        tensor=torch.clamp(tensor, 0)
+        input_normalization = torch.max(tensor).item()
+        if(input_normalization<=1e-9):
+            input_normalization=1
+        tensor=torch.round((tensor/input_normalization)*(2**self.input_DAC.quantization_bitwidth - 1))
+        #
+
         input_tensor=self.laser(self.input_DAC(tensor))
         multiplied = self.mzm(input_tensor)
         accumulated = self.mrr(multiplied)
@@ -175,10 +183,15 @@ class OpticalDotProduct(nn.Module):
 
         
         #Software Implemented transformation
-        output*=self.weights_normalization
-        output/=2**(self.adc.quantization_bitwidth-self.input_DAC.quantization_bitwidth)
-        output/=self.laser.optical_gain * self.mrr.mrr_loss * self.mzm.y_branch_loss*self.mzm.mzm_loss
-        output/=(self.pd_positive.pd_responsivity+self.pd_negative.pd_responsivity)/2
+        scale=1
+        scale*=self.weights_normalization
+        scale/=2**(self.adc.quantization_bitwidth-self.input_DAC.quantization_bitwidth)
+        scale/=self.laser.optical_gain * self.mrr.mrr_loss * self.mzm.y_branch_loss*self.mzm.mzm_loss
+        scale/=(self.pd_positive.pd_responsivity+self.pd_negative.pd_responsivity)/2
+        scale/=(2**self.input_DAC.quantization_bitwidth - 1)
+        scale*=input_normalization
+
+        output=output*scale
         #
         return output
 
