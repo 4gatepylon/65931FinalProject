@@ -54,9 +54,12 @@ class Laser(nn.Module):
 
     def __init__(
         self,
-        optical_gain=1, # What the voltage is multiplied by to get the optical power.
+        optical_gain=0.1, # What the voltage is multiplied by to get the optical power.
     ):
+        super().__init__()
         self.optical_gain = optical_gain
+    def forward(self, tensor):
+        return tensor*self.optical_gain
 
 
 class MZM(nn.Module):
@@ -69,6 +72,7 @@ class MZM(nn.Module):
         mzm_loss_DB = 0,
         y_branch_loss_DB = 0,
     ):
+        super().__init__()
         self.weights=weights
         self.voltage_min=voltage_min
         self.voltage_max=voltage_max
@@ -88,7 +92,8 @@ class MRR(nn.Module):
         mrr_fsr_nm = 16.1,
         mrr_loss_dB = 0,
     ):
-        self.weights_positive_mask=weights_positive_mask
+        super().__init__()
+        self.weights_positive_mask=weights_positive_mask.float()
         self.mrr_loss = dB_to_linear(mrr_loss_dB)
         self.mrr_k2 = mrr_k2
         self.mrr_fsr_nm = mrr_fsr_nm
@@ -111,6 +116,7 @@ class PD(nn.Module):
         pd_dark_current_pA = 0, # In pA @ 1V.
         pd_resistance = 50, # In Ohm. TODO: Not specified anywhere in the paper.
     ):
+        super().__init__()
         self.pd_resistance = pd_resistance
         self.pd_responsivity = pd_responsivity
         self.pd_dark_current_pA = pd_dark_current_pA
@@ -131,27 +137,31 @@ class OpticalDotProduct(nn.Module):
     def __init__(
         self,
         weights,
+        weight_quantization_bitwidth=8,
+        input_quantization_bitwidth=8,
+        output_quantization_bitwidth=10,
         tia_gain=1
     ):
+        super().__init__()
         #Software Implemented transformation
-        self.weights_normalization = torch.max(torch.abs(weights))[0]
+        self.weights_normalization = torch.max(torch.abs(weights)).item()
         if(self.weights_normalization<=1e-9):
             self.weights_normalization=1
-        weights=weights/self.weights_normalization
+        weights=(weights/self.weights_normalization)*(2**weight_quantization_bitwidth - 1)
         #
 
-        self.input_DAC=DAC()
-        self.weight_DAC=DAC()
-        self.weight_tensor=self.weight_DAC(self.weights)
+        self.input_DAC=DAC(input_quantization_bitwidth)
+        self.weight_DAC=DAC(weight_quantization_bitwidth)
+        self.weight_tensor=self.weight_DAC(torch.abs(weights))
 
         self.laser = Laser()
-        self.mzm = MZM(torch.abs(self.weight_tensor))
+        self.mzm = MZM(self.weight_tensor)
 
         self.mrr = MRR(weights>=0)
         self.pd_positive=PD()
         self.pd_negative=PD()
 
-        self.adc = ADC()
+        self.adc = ADC(output_quantization_bitwidth)
 
         self.tia_gain=tia_gain
 
@@ -160,9 +170,16 @@ class OpticalDotProduct(nn.Module):
         multiplied = self.mzm(input_tensor)
         accumulated = self.mrr(multiplied)
         output_current = self.pd_positive(accumulated[0])-self.pd_positive(accumulated[1])
-
         output_voltage=output_current*self.tia_gain
         output = self.adc(output_voltage)
+
+        
+        #Software Implemented transformation
+        output*=self.weights_normalization
+        output/=2**(self.adc.quantization_bitwidth-self.input_DAC.quantization_bitwidth)
+        output/=self.laser.optical_gain * self.mrr.mrr_loss * self.mzm.y_branch_loss*self.mzm.mzm_loss
+        output/=(self.pd_positive.pd_responsivity+self.pd_negative.pd_responsivity)/2
+        #
         return output
 
 
