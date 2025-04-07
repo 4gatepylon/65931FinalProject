@@ -210,12 +210,12 @@ class OpticalDotProductConfiguration(pydantic.BaseModel):
     pd_cfg: PDConfiguration = PDConfiguration()
     adc_cfg: ADCConfiguration = ADCConfiguration()
 
-    # TODO(Adriano) move all this configuration load/store stuff to a base class so we can, for example, have different
-    # types of configs in different files (this is something that is low priority, so do it eventually when we know
-    # what will be most convenient)
+    # TODO(Adriano) move all this configuration load/store stuff to a base class so we can and make it paramterizeable
     @staticmethod
     def configs_path() -> Path:
-        path = DEFAULT_CONFIG_PATH if os.environ.get("ALBIREO_CONFIG_PATH", None) is None else Path(os.environ["ALBIREO_CONFIG_PATH"]) # fmt: skip
+        if os.environ.get("ALBIREO_CONFIG_PATH", None) is not None:
+            raise NotImplementedError("Config path is not implemented (would have issues with local path in testing scripts)") # fmt: skip
+        path = DEFAULT_CONFIG_PATH
         if not path.exists():
             raise FileNotFoundError(f"Config path {path} does not exist")
         return path
@@ -225,7 +225,7 @@ class OpticalDotProductConfiguration(pydantic.BaseModel):
         pydantic_yaml.to_yaml_file(path, self)
 
     def save(self, name: str):
-        save_path = self.configs_path() / f"{name}.yaml"
+        save_path = OpticalDotProductConfiguration.configs_path() / f"{name}.yaml"
         if save_path.exists():
             raise FileExistsError(f"Config file {save_path} already exists")
         self.save_to_path(save_path)
@@ -237,7 +237,7 @@ class OpticalDotProductConfiguration(pydantic.BaseModel):
 
     @staticmethod
     def from_config_name(config_name: str) -> OpticalDotProductConfiguration:
-        configs_path = OpticalDotProduct.configs_path()
+        configs_path = OpticalDotProductConfiguration.configs_path()
         config_path = configs_path / f"{config_name}.yaml"
         if not config_path.exists():
             raise FileNotFoundError(f"Config file {config_path} does not exist")
@@ -316,6 +316,14 @@ class OpticalDotProduct(nn.Module):
         return self.cfg
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "1"]:
+        # Software Implemented transformation
+        # TODO(Adriano) is this correct? it sends shit wayyyy off
+        # tensor=torch.clamp(tensor, 0)
+        # input_normalization = torch.max(tensor).item()
+        # if(input_normalization<=1e-9):
+        #     input_normalization=1
+        # tensor=torch.round((tensor/input_normalization)*(2**self.input_DAC.quantization_bitwidth - 1)) # fmt: skip
+
         input_tensor=self.laser(self.input_DAC(tensor)) # fmt: skip
         multiplied = self.mzm(input_tensor) # fmt: skip
         accumulated = self.mrr(multiplied) # fmt: skip
