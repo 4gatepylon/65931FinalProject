@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import typing as t
 import math
 import numpy as np
@@ -102,8 +103,7 @@ class MRR(nn.Module):
         
         stacked *= self.mrr_loss
         #TODO(From Dylan): Implement optical cross talk (We still have powers seperated by wavelength at this point)
-
-        ret = stacked.sum(dim=1)
+        ret = stacked.sum(dim=2)
         return ret
 
 class PD(nn.Module):
@@ -133,6 +133,8 @@ class PD(nn.Module):
         noise_shot = torch.randn_like(tensor)*(2*ELEMENTARY_CHARGE*self.pd_HZ)
         tensor = tensor * (1+noise_shot)
         return tensor
+#weights = (Y)
+#inputs = (Channel, Y)
 class OpticalDotProduct(nn.Module):
     def __init__(
         self,
@@ -168,9 +170,9 @@ class OpticalDotProduct(nn.Module):
     def forward(self, tensor):
         #Software Implemented transformation
         tensor=torch.clamp(tensor, 0)
-        input_normalization = torch.max(tensor).item()
-        if(input_normalization<=1e-9):
-            input_normalization=1
+        input_normalization =torch.max(tensor, dim=1).values
+        input_normalization[input_normalization <= 1e-9] = 1.0
+        input_normalization=input_normalization.unsqueeze(1)
         tensor=torch.round((tensor/input_normalization)*(2**self.input_DAC.quantization_bitwidth - 1))
         #
 
@@ -180,7 +182,6 @@ class OpticalDotProduct(nn.Module):
         output_current = self.pd_positive(accumulated[0])-self.pd_positive(accumulated[1])
         output_voltage=output_current*self.tia_gain
         output = self.adc(output_voltage)
-
         
         #Software Implemented transformation
         scale=1
@@ -190,10 +191,69 @@ class OpticalDotProduct(nn.Module):
         scale/=(self.pd_positive.pd_responsivity+self.pd_negative.pd_responsivity)/2
         scale/=(2**self.input_DAC.quantization_bitwidth - 1)
         scale*=input_normalization
+        scale=scale.T[0]
 
         output=output*scale
         #
         return output
 
+#weights = (Channels OUT, Channels IN, Kernel Y, Kernel X)
+#inputs = (Batch, Channels IN, Y, X)
+#output = (Batch, Channels OUT, Y OUT, X OUT)
+class OpticalConvolution(nn.Module):
+    def __init__(
+        self,
+        weights,
+        weight_quantization_bitwidth=8,
+        input_quantization_bitwidth=8,
+        output_quantization_bitwidth=10,
+        tia_gain=1
+    ):
+        super().__init__()
+        self.kernel_size = weights.shape
+        self.plcus = []
+        for i in F.unfold(weights.float(), kernel_size=1):
+            i=torch.flatten(i)
+            self.plcus.append(OpticalDotProduct(i, weight_quantization_bitwidth, input_quantization_bitwidth, output_quantization_bitwidth, tia_gain))
 
+    def forward(self, tensor):
+        shape = tensor.shape
+        ret_shape=(shape[0], self.kernel_size[0], shape[2]-self.kernel_size[2]+1, shape[3]-self.kernel_size[3]+1)
+        ret = torch.zeros(ret_shape)
+        tensor=tensor.float()
 
+        for i in range(shape[0]):
+            batch = tensor[i]
+            channel_in=F.unfold(batch, kernel_size=self.kernel_size[2:4]).T
+            for j in range(self.kernel_size[0]):
+                res = self.plcus[j](channel_in)
+                res = F.fold(res.unsqueeze(0), output_size=ret_shape[2:], kernel_size=1, stride=1)[0]
+                ret[i][j] = res
+        return ret
+    
+class OpticalFC(nn.Module):
+    def __init__(
+        self,
+        weights,
+        biases,
+        weight_quantization_bitwidth=8,
+        input_quantization_bitwidth=8,
+        output_quantization_bitwidth=10,
+        tia_gain=1
+    ):
+        super().__init__()
+        weights = torch.cat([weights.float(), biases.unsqueeze(1).float()], dim=1)
+        self.kernel_size = weights.shape
+        self.plcus = []
+        for i in weights:
+            self.plcus.append(OpticalDotProduct(i, weight_quantization_bitwidth, input_quantization_bitwidth, output_quantization_bitwidth, tia_gain))
+
+    def forward(self, tensor):
+        shape = tensor.shape
+        ret_shape=(shape[0], self.kernel_size[0])
+        ret = torch.zeros(ret_shape)
+        tensor = torch.cat([tensor.float(), torch.ones([shape[0], 1]).float()], dim=1)
+        for i in range(ret_shape[1]):
+            ret[:,i] = self.plcus[i](tensor)
+        return ret
+    
