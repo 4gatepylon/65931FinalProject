@@ -197,6 +197,11 @@ class OpticalDotProduct(nn.Module):
         #
         return output
 
+def calculate_conv2d_output_size(input_height, input_width, kernel_height, kernel_width, stride, padding, dilation):
+    output_height = (input_height - dilation * (kernel_height - 1) - 1 + 2 * padding) // stride + 1
+    output_width = (input_width - dilation * (kernel_width - 1) - 1 + 2 * padding) // stride + 1
+    return output_height, output_width
+
 #weights = (Channels OUT, Channels IN, Kernel Y, Kernel X)
 #inputs = (Batch, Channels IN, Y, X)
 #output = (Batch, Channels OUT, Y OUT, X OUT)
@@ -204,6 +209,9 @@ class OpticalConvolution(nn.Module):
     def __init__(
         self,
         weights,
+        stride=1,
+        padding=0,
+        dilation=1,
         weight_quantization_bitwidth=8,
         input_quantization_bitwidth=8,
         output_quantization_bitwidth=10,
@@ -211,6 +219,9 @@ class OpticalConvolution(nn.Module):
     ):
         super().__init__()
         self.kernel_size = weights.shape
+        self.stride=stride
+        self.padding=padding
+        self.dilation=dilation
         self.plcus = []
         for i in F.unfold(weights.float(), kernel_size=1):
             i=torch.flatten(i)
@@ -218,13 +229,14 @@ class OpticalConvolution(nn.Module):
 
     def forward(self, tensor):
         shape = tensor.shape
-        ret_shape=(shape[0], self.kernel_size[0], shape[2]-self.kernel_size[2]+1, shape[3]-self.kernel_size[3]+1)
+        conv_dims=calculate_conv2d_output_size(shape[2], shape[3], self.kernel_size[2], self.kernel_size[3], self.stride, self.padding, self.dilation)
+        ret_shape=(shape[0], self.kernel_size[0], conv_dims[0], conv_dims[1])
         ret = torch.zeros(ret_shape)
         tensor=tensor.float()
 
         for i in range(shape[0]):
             batch = tensor[i]
-            channel_in=F.unfold(batch, kernel_size=self.kernel_size[2:4]).T
+            channel_in=F.unfold(batch, self.kernel_size[2:4], self.dilation, self.padding, self.stride).T
             for j in range(self.kernel_size[0]):
                 res = self.plcus[j](channel_in)
                 res = F.fold(res.unsqueeze(0), output_size=ret_shape[2:], kernel_size=1, stride=1)[0]
