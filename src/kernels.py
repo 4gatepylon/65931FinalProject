@@ -2,7 +2,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import torch
-import pydantic_yaml
 import torch.nn as nn
 import torch.nn.functional as F
 import typing as t
@@ -12,12 +11,12 @@ from jaxtyping import Float, Bool
 import pydantic
 from typing import Optional
 import dotenv
-from configurations import *
+from .configurations import *
 
 dotenv.load_dotenv()
 
 # Our imports
-from utils import (
+from .utils import (
     dB_to_linear,
     BOLTZMANN_CONST,
     ELEMENTARY_CHARGE,
@@ -186,6 +185,7 @@ class OpticalDotProduct(nn.Module):
         output_adc_quantization_bitwidth: Optional[int] = None,
     ):
         super().__init__()
+        self.starting_weights = weights
         # Override the defaults
         if input_quantization_bitwidth is not None:
             cfg.input_dac_cfg.quantization_bitwidth = input_quantization_bitwidth # fmt: skip
@@ -216,14 +216,23 @@ class OpticalDotProduct(nn.Module):
         self.cfg = cfg  # Save to deal with overrides
 
     def forward(self, tensor):
-        #Software Implemented transformation
-        tensor=torch.clamp(tensor, 0)
-        input_normalization =torch.max(tensor, dim=1).values
+        # Software Implemented transformation
+        # Shift by min(0, min(tensor)) to avoid negative values.
+        # Happens at the beggining of the model, but not after Relus.
+        input_shift = torch.min(tensor, dim=1).values
+        input_shift[input_shift > 0] = 0
+        # Generally false.
+        any_shift: bool = input_shift.sum() != 0
+        if any_shift:
+            tensor = tensor - input_shift.unsqueeze(1)
+        # Other transformation.
+        input_normalization = torch.max(tensor, dim=1).values
         input_normalization[input_normalization <= 1e-9] = 1.0
         input_normalization=input_normalization.unsqueeze(1)
-        tensor=torch.round((tensor/input_normalization)*(2**self.input_DAC.quantization_bitwidth - 1))
-        #
-
+        tensor = tensor / input_normalization
+        tensor = torch.round((tensor)*(2**self.input_DAC.quantization_bitwidth - 1))
+        
+        # Optical Dot Product itself.
         input_tensor=self.laser(self.input_DAC(tensor))
         multiplied = self.mzm(input_tensor)
         accumulated = self.mrr(multiplied)
@@ -240,10 +249,13 @@ class OpticalDotProduct(nn.Module):
         scale/=(2**self.input_DAC.quantization_bitwidth - 1)
         scale*=input_normalization
         scale=scale.T[0]
-
         output=output*scale
-        #
+        # Shift back. Just do elementwise addition.
+        if any_shift:
+            output_shift = input_shift * self.starting_weights.sum()
+            output = output + output_shift.unsqueeze(1)
         return output
+    
     def get_active_configuration(self) -> OpticalDotProductConfiguration:
         return self.cfg
 

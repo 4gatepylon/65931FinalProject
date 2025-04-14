@@ -18,8 +18,8 @@ from datasets import load_dataset  # Hugging Face Datasets library
 import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
-from kernels import * 
-from configurations import *
+from .kernels import * 
+from .configurations import *
 from tqdm import tqdm
 
 def get_image_net_mappings():
@@ -229,10 +229,3 @@ class Loader:
         return
 
 
-if __name__ == "__main__":
-    # Example usage
-    dataset_name = "mini-imagenet"  # Change this to "tiny-imagenet" or "imagenet" as needed
-    loader = Loader(dataset_name, max_num_data_points=20)
-    loader.test_model_on_dataset(custom=True)
-    loader.test_model_on_dataset(custom=False)
-    # loader.test_model_on_dataset(custom=False)
