@@ -18,107 +18,8 @@ from datasets import load_dataset  # Hugging Face Datasets library
 import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
-
-class CustomFC(nn.Module):
-    """
-    Custom Fully Connected Layer.
-    For now, behave like an actual fully connected layer.
-    """
-
-    def __init__(
-        self,
-        original_fc: nn.Linear,
-    ):
-        super(CustomFC, self).__init__()
-        self.in_features = original_fc.in_features
-        self.out_features = original_fc.out_features
-        self.weight = original_fc.weight
-        self.bias = original_fc.bias
-        assert not original_fc.training, "CustomFC should not be in training mode"
-
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for the custom fully connected layer.
-        Args:
-            x (torch.Tensor): Input tensor.
-        Returns:
-            torch.Tensor: Output tensor.
-        """
-        # Perform the forward pass using the original weight and bias
-        return F.linear(x, self.weight, self.bias)
-    
-
-    def extra_repr(self) -> str:
-        """
-        Extra representation of the custom fully connected layer.
-        Returns:
-            str: Extra representation string.
-        """
-        return f"CustomFC(in_features={self.in_features}, out_features={self.out_features})"
-    
-
-    def __repr__(self) -> str:
-        """
-        String representation of the custom fully connected layer.
-        Returns:
-            str: String representation.
-        """
-        return f"CustomFC(in_features={self.in_features}, out_features={self.out_features})"
-    
-
-
-class CustomConv2d(nn.Module):
-    """
-    Custom Convolutional Layer.
-    For now, behave like an actual convolutional layer.
-    """
-
-    def __init__(
-        self,
-        original_conv: nn.Conv2d,
-    ):
-        super(CustomConv2d, self).__init__()
-        self.in_channels = original_conv.in_channels
-        self.out_channels = original_conv.out_channels
-        self.kernel_size = original_conv.kernel_size
-        self.stride = original_conv.stride
-        self.padding = original_conv.padding
-        self.dilation = original_conv.dilation
-        self.groups = original_conv.groups
-        self.weight = original_conv.weight
-        self.bias = original_conv.bias
-        assert not original_conv.training, "CustomConv2d should not be in training mode"
-        self.eval()  # Set the module to evaluation mode
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for the custom convolutional layer.
-        Args:
-            x (torch.Tensor): Input tensor.
-        Returns:
-            torch.Tensor: Output tensor.
-        """
-        # Perform the forward pass using the original weight and bias
-        return F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
-    
-
-    def extra_repr(self) -> str:
-        """
-        Extra representation of the custom convolutional layer.
-        Returns:
-            str: Extra representation string.
-        """
-        return f"CustomConv2d(in_channels={self.in_channels}, out_channels={self.out_channels}, kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding})"
-    
-    def __repr__(self) -> str:
-        """
-        String representation of the custom convolutional layer.
-        Returns:
-            str: String representation.
-        """
-        return f"CustomConv2d(in_channels={self.in_channels}, out_channels={self.out_channels}, kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding})"
-
+from src.kernels import * 
+from src.configurations import *
 
 def get_image_net_mappings():
     labels_url = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
@@ -160,9 +61,13 @@ def replace_layers(model: nn.Module) -> nn.Module:
     replacements = {}
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear):
-            replacements[name] = CustomFC(module)
+            replacements[name] = OpticalFC(module.weight, module.bias, OpticalDotProductConfiguration())
         elif isinstance(module, nn.Conv2d):
-            replacements[name] = CustomConv2d(module)
+            if(module.groups != 1):
+                raise Exception('Groups neq 1 not supported')
+            if(module.padding_mode != "zeros"):
+                raise Exception('padding_mode neq \'zeros\' not supported')
+            replacements[name] = OpticalConvolution(module.weight, OpticalDotProductConfiguration(), module.bias, module.stride, module.padding, module.dilation)
     for name, replacement in replacements.items():
         # Replace the original module with the custom one
         parent_module = model

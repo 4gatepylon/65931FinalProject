@@ -259,10 +259,11 @@ class OpticalConvolution(nn.Module):
     def __init__(
         self,
         weights,
+        cfg: OpticalDotProductConfiguration,
         bias=None,
         stride=1,
         padding=0,
-        dilation=1
+        dilation=1,
     ):
         super().__init__()
         if(bias==None):
@@ -276,7 +277,7 @@ class OpticalConvolution(nn.Module):
         weights = F.unfold(weights.float(), kernel_size=1)
         for i in range(weights.shape[0]):
             weight=torch.cat([torch.flatten(weights[i]), torch.tensor([bias[i]])])
-            self.plcus.append(OpticalDotProduct(weight, OpticalDotProductConfiguration()))
+            self.plcus.append(OpticalDotProduct(weight, cfg))
 
     def forward(self, tensor):
         shape = tensor.shape
@@ -300,17 +301,14 @@ class OpticalFC(nn.Module):
         self,
         weights,
         biases,
-        weight_quantization_bitwidth=8,
-        input_quantization_bitwidth=8,
-        output_quantization_bitwidth=10,
-        tia_gain=1
+        cfg: OpticalDotProductConfiguration
     ):
         super().__init__()
         weights = torch.cat([weights.float(), biases.unsqueeze(1).float()], dim=1)
         self.kernel_size = weights.shape
         self.plcus = []
         for i in weights:
-            self.plcus.append(OpticalDotProduct(i, OpticalDotProductConfiguration()))
+            self.plcus.append(OpticalDotProduct(i, cfg))
 
     def forward(self, tensor):
         shape = tensor.shape
