@@ -110,16 +110,17 @@ class MRR(nn.Module):
         cfg: MRRConfiguration,
     ):
         super().__init__()
-        self.weights_positive_mask = weights_positive_mask.float()
+        self.weights_positive_mask = weights_positive_mask
         self.mrr_loss = dB_to_linear(cfg.mrr_loss_dB)
         self.mrr_k2 = cfg.mrr_k2
         self.mrr_fsr_nm = cfg.mrr_fsr_nm
 
-    def forward(self, tensor):
+    def forward(self, tensor, tensor_positive_mask):
+        positive_mask = (self.weights_positive_mask^tensor_positive_mask^1).float()
         stacked = torch.stack(
             [
-                tensor * self.weights_positive_mask,
-                tensor * (1 - self.weights_positive_mask),
+                tensor * positive_mask,
+                tensor * (1 - positive_mask),
             ],
             dim=0,
         )
@@ -217,7 +218,8 @@ class OpticalDotProduct(nn.Module):
 
     def forward(self, tensor):
         #Software Implemented transformation
-        tensor=torch.clamp(tensor, 0)
+        tensor_positive_mask = tensor > 0
+        tensor=torch.abs(tensor)
         input_normalization =torch.max(tensor, dim=1).values
         input_normalization[input_normalization <= 1e-9] = 1.0
         input_normalization=input_normalization.unsqueeze(1)
@@ -226,7 +228,7 @@ class OpticalDotProduct(nn.Module):
 
         input_tensor=self.laser(self.input_DAC(tensor))
         multiplied = self.mzm(input_tensor)
-        accumulated = self.mrr(multiplied)
+        accumulated = self.mrr(multiplied, tensor_positive_mask)
         output_current = self.pd_positive(accumulated[0])-self.pd_positive(accumulated[1])
         output_voltage=output_current*self.tia_gain
         output = self.adc(output_voltage)
