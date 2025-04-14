@@ -209,6 +209,7 @@ class OpticalConvolution(nn.Module):
     def __init__(
         self,
         weights,
+        bias=None,
         stride=1,
         padding=0,
         dilation=1,
@@ -218,14 +219,18 @@ class OpticalConvolution(nn.Module):
         tia_gain=1
     ):
         super().__init__()
+        if(bias==None):
+            bias = torch.zeros((weights.shape[0],))
         self.kernel_size = weights.shape
         self.stride=stride
         self.padding=padding
         self.dilation=dilation
         self.plcus = []
-        for i in F.unfold(weights.float(), kernel_size=1):
-            i=torch.flatten(i)
-            self.plcus.append(OpticalDotProduct(i, weight_quantization_bitwidth, input_quantization_bitwidth, output_quantization_bitwidth, tia_gain))
+
+        weights = F.unfold(weights.float(), kernel_size=1)
+        for i in range(weights.shape[0]):
+            weight=torch.cat([torch.flatten(weights[i]), torch.tensor([bias[i]])])
+            self.plcus.append(OpticalDotProduct(weight, weight_quantization_bitwidth, input_quantization_bitwidth, output_quantization_bitwidth, tia_gain))
 
     def forward(self, tensor):
         shape = tensor.shape
@@ -237,6 +242,7 @@ class OpticalConvolution(nn.Module):
         for i in range(shape[0]):
             batch = tensor[i]
             channel_in=F.unfold(batch, self.kernel_size[2:4], self.dilation, self.padding, self.stride).T
+            channel_in=torch.cat([channel_in, torch.ones((channel_in.shape[0], 1))], dim=1)
             for j in range(self.kernel_size[0]):
                 res = self.plcus[j](channel_in)
                 res = F.fold(res.unsqueeze(0), output_size=ret_shape[2:], kernel_size=1, stride=1)[0]
