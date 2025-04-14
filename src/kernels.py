@@ -4,12 +4,13 @@ from pathlib import Path
 import torch
 import pydantic_yaml
 import torch.nn as nn
+import einops
 import typing as t
 import math
 import numpy as np
 from jaxtyping import Float, Bool
 import pydantic
-from typing import Optional
+from typing import Optional, List
 import dotenv
 
 dotenv.load_dotenv()
@@ -133,7 +134,11 @@ class MRRConfiguration(pydantic.BaseModel):
 
 
 class MRR(nn.Module):
-    """Micro-ring resonator."""
+    """
+    Micro-ring resonator chain (not a single one). This models having
+    two chains: one for positive weights and one for negative weights
+    of resonators along columns of the crossbar of resonators.
+    """
 
     def __init__(
         self,
@@ -164,7 +169,7 @@ class MRR(nn.Module):
 
 class PDConfiguration(pydantic.BaseModel):
     pd_rin_DBCHZ: float = 0
-    pd_GHZ: float = 5
+    pd_GHZ: float = 5 # what they call "delta f"
     pd_T: float = 300  # Temperature in Kelvin.
     pd_responsivity: float = 1.0  # In A/W.
     pd_dark_current_pA: float = 0  # In pA @ 1V.
@@ -172,7 +177,15 @@ class PDConfiguration(pydantic.BaseModel):
 
 
 class PD(nn.Module):
-    """Photo-diode"""
+    """
+    Photo-diode.
+    
+    We assume that the noise is applied AFTER the accumulation of all currents.
+    This is a worst-case scenario, since we split positive and negative currents
+    into two "positive" sections the worst that can happen is that the noise
+    is applied at the very end (for shot noise) or it doesn't matter when
+    (for thermal noise).
+    """
 
     def __init__(
         self,
@@ -186,16 +199,49 @@ class PD(nn.Module):
         self.pd_HZ = cfg.pd_GHZ * 1e9
         self.pd_T = cfg.pd_T
 
-    def forward(self, tensor):
+    def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
         tensor = tensor * self.pd_responsivity
         tensor = tensor + self.pd_dark_current_pA
 
-        noise_thermal = torch.randn_like(tensor) * 4 * BOLTZMANN_CONST * self.pd_T * self.pd_HZ / self.pd_resistance # fmt: skip
+        noise_thermal_std = torch.sqrt(4 * BOLTZMANN_CONST * self.pd_T * self.pd_HZ / self.pd_resistance)
+        noise_thermal = torch.randn_like(tensor) * noise_thermal_std
         tensor = tensor + noise_thermal
 
-        noise_shot = torch.randn_like(tensor) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
-        tensor = tensor * (1 + noise_shot)
+        I_pd_std2 = tensor # current flowing out affects shot noise
+        noise_shot_std = torch.sqrt(2 * ELEMENTARY_CHARGE * self.pd_HZ * I_pd_std2)
+        noise_shot = torch.randn_like(tensor) * noise_shot_std
+        tensor += noise_shot
         return tensor
+
+class CrosstalkConfiguration(pydantic.BaseModel):
+    crosstalk_matrix: List[List[float]]
+    n_chunks: int = 1
+
+class Crosstalk(nn.Module):
+    def __init__(self, cfg: CrosstalkConfiguration):
+        super().__init__()
+        self.p = torch.tensor(cfg.crosstalk_matrix)
+        self.n_freq = self.p.shape[0]
+        assert torch.all(self.p.sum(dim=1) == 1)
+        assert torch.all(self.p >= 0)
+        assert torch.all(self.p <= 1)
+        assert self.p.shape == (cfg.n_freq, cfg.n_freq)
+        self.n_chunks = cfg.n_chunks
+
+    def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
+        assert tensor.shape == (self.n_freq,)
+        slices = tensor / self.n_chunks
+        p_expand = einops.repeat(self.p, "F1 F2 -> C F1 F2", C=self.n_chunks, F1=self.n_freq, F2=self.n_freq)
+        samples = torch.rand_like(p_expand)
+        samples_transferred = samples <= p_expand # transfer if you lie in the CDF
+        assert samples_transferred.max() <= 1
+        assert samples_transferred.min() >= 0
+        # XXX there is a but where we don't subtract...
+        amt_transferred_per_chunk = samples_transferred @ slices
+        assert amt_transferred_per_chunk.shape == (self.n_chunks, self.n_freq)
+        amt_transferred = amt_transferred_per_chunk.sum(dim=0)
+        assert amt_transferred.shape == (self.n_freq,) # per chan
+        return amt_transferred + tensor
 
 
 class OpticalDotProductConfiguration(pydantic.BaseModel):
@@ -209,6 +255,7 @@ class OpticalDotProductConfiguration(pydantic.BaseModel):
     mrr_cfg: MRRConfiguration = MRRConfiguration()
     pd_cfg: PDConfiguration = PDConfiguration()
     adc_cfg: ADCConfiguration = ADCConfiguration()
+    post_mzm_crosstalk_cfg: CrosstalkConfiguration = CrosstalkConfiguration()
 
     # TODO(Adriano) move all this configuration load/store stuff to a base class so we can and make it paramterizeable
     @staticmethod
@@ -302,6 +349,7 @@ class OpticalDotProduct(nn.Module):
 
         self.laser = Laser(cfg=cfg.laser_cfg)
         self.mzm = MZM(self.weight_tensor, cfg=cfg.mzm_cfg)
+        self.post_mzm_crosstalk = Crosstalk(cfg=cfg.post_mzm_crosstalk_cfg)
 
         self.mrr = MRR(weights_transformed >= 0, cfg=cfg.mrr_cfg)
         self.pd_positive = PD(cfg=cfg.pd_cfg)
@@ -326,6 +374,7 @@ class OpticalDotProduct(nn.Module):
 
         input_tensor=self.laser(self.input_DAC(tensor)) # fmt: skip
         multiplied = self.mzm(input_tensor) # fmt: skip
+        multiplied = self.post_mzm_crosstalk(multiplied)
         accumulated = self.mrr(multiplied) # fmt: skip
         output_current = self.pd_positive(accumulated[0])-self.pd_positive(accumulated[1]) # fmt: skip
         output_voltage=output_current*self.tia_gain # fmt: skip
