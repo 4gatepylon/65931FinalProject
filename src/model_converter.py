@@ -19,38 +19,6 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
 
-
-
-def get_image_net_mappings():
-    labels_url = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
-    try:
-        response = requests.get(labels_url)
-        response.raise_for_status() # Raise an exception for bad status codes
-        # This map is { "0": ["n01440764", "tench"], "1": ["n01443537", "goldfish"], ... }
-        imagenet1k_idx_to_classinfo = json.loads(response.text)
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching ImageNet mapping: {e}")
-        exit()
-    except json.JSONDecodeError:
-        print("Error decoding ImageNet mapping JSON.")
-        exit()
-    print(list(imagenet1k_idx_to_classinfo.items())[:10])
-    imagenet1k_idx_to_classinfo['12']
-    ident_to_idx = {v[0]: int(k) for k, v in imagenet1k_idx_to_classinfo.items()}
-    idx_to_ident = {int(k): v[0] for k, v in imagenet1k_idx_to_classinfo.items()}
-    return ident_to_idx, idx_to_ident
-
-def best_device():
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        return torch.device("mps")
-    else:
-        return torch.device("cpu")
-
-
-
-
 class CustomFC(nn.Module):
     """
     Custom Fully Connected Layer.
@@ -150,6 +118,35 @@ class CustomConv2d(nn.Module):
             str: String representation.
         """
         return f"CustomConv2d(in_channels={self.in_channels}, out_channels={self.out_channels}, kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding})"
+
+
+def get_image_net_mappings():
+    labels_url = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
+    try:
+        response = requests.get(labels_url)
+        response.raise_for_status() # Raise an exception for bad status codes
+        # This map is { "0": ["n01440764", "tench"], "1": ["n01443537", "goldfish"], ... }
+        imagenet1k_idx_to_classinfo = json.loads(response.text)
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching ImageNet mapping: {e}")
+        exit()
+    except json.JSONDecodeError:
+        print("Error decoding ImageNet mapping JSON.")
+        exit()
+    print(list(imagenet1k_idx_to_classinfo.items())[:10])
+    imagenet1k_idx_to_classinfo['12']
+    ident_to_idx = {v[0]: int(k) for k, v in imagenet1k_idx_to_classinfo.items()}
+    idx_to_ident = {int(k): v[0] for k, v in imagenet1k_idx_to_classinfo.items()}
+    return ident_to_idx, idx_to_ident
+
+def best_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
 
 
 def replace_layers(model: nn.Module) -> nn.Module:
