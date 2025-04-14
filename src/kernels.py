@@ -147,11 +147,11 @@ class PD(nn.Module):
         tensor = tensor * self.pd_responsivity
         tensor = tensor + self.pd_dark_current_pA
 
-        noise_thermal = torch.randn_like(tensor) * 4 * BOLTZMANN_CONST * self.pd_T * self.pd_HZ / self.pd_resistance # fmt: skip
-        tensor = tensor + noise_thermal
+        # noise_thermal = torch.randn_like(tensor, device=tensor.device) * 4 * BOLTZMANN_CONST * self.pd_T * self.pd_HZ / self.pd_resistance # fmt: skip
+        # tensor = tensor + noise_thermal
 
-        noise_shot = torch.randn_like(tensor) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
-        tensor = tensor * (1 + noise_shot)
+        # noise_shot = torch.randn_like(tensor, device=tensor.device) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
+        # tensor = tensor * (1 + noise_shot)
         return tensor
 
 class OpticalDotProduct(nn.Module):
@@ -215,6 +215,16 @@ class OpticalDotProduct(nn.Module):
         self.tia_gain = cfg.tia_gain
         self.cfg = cfg  # Save to deal with overrides
 
+    def reference_dot_product(
+        self,
+        tensor: torch.Tensor,
+    ):
+        # Elementwise multiplication
+        tensor = tensor * self.starting_weights
+        # Sum over the last dimension
+        tensor = tensor.sum(dim=1)
+        return tensor
+
     def forward(self, tensor):
         # Software Implemented transformation
         # Shift by min(0, min(tensor)) to avoid negative values.
@@ -222,17 +232,29 @@ class OpticalDotProduct(nn.Module):
         input_shift = torch.min(tensor, dim=1).values
         input_shift[input_shift > 0] = 0
         # Generally false.
+        # print(f"\nPre-Input Shape: {tensor.shape}")
         any_shift: bool = input_shift.sum() != 0
         if any_shift:
             tensor = tensor - input_shift.unsqueeze(1)
+        # print(f"Post-Input Shape: {tensor.shape}")
         # Other transformation.
         input_normalization = torch.max(tensor, dim=1).values
         input_normalization[input_normalization <= 1e-9] = 1.0
         input_normalization=input_normalization.unsqueeze(1)
         tensor = tensor / input_normalization
         tensor = torch.round((tensor)*(2**self.input_DAC.quantization_bitwidth - 1))
-        
+        # if True:
+        #     # Quick debug.
+        #     debug_tensor = tensor.clone()
+        #     debug_tensor = debug_tensor / (2**self.input_DAC.quantization_bitwidth - 1)
+        #     debug_tensor = debug_tensor * input_normalization
+        #     debug_tensor = debug_tensor + input_shift.unsqueeze(1)
+        #     # print(f"Debug Tensor: {debug_tensor}")
+        #     # print(f"Input Tensor: {tensor}")
+
+
         # Optical Dot Product itself.
+
         input_tensor=self.laser(self.input_DAC(tensor))
         multiplied = self.mzm(input_tensor)
         accumulated = self.mrr(multiplied)
@@ -251,9 +273,11 @@ class OpticalDotProduct(nn.Module):
         scale=scale.T[0]
         output=output*scale
         # Shift back. Just do elementwise addition.
+        # print(f"Pre-Output Shape: {output.shape}")
         if any_shift:
             output_shift = input_shift * self.starting_weights.sum()
-            output = output + output_shift.unsqueeze(1)
+            output = output + output_shift
+        # print(f"Post-Output Shape: {output.shape}")
         return output
     
     def get_active_configuration(self) -> OpticalDotProductConfiguration:
@@ -284,8 +308,9 @@ class OpticalConvolution(nn.Module):
         dilation=1,
     ):
         super().__init__()
+        device = weights.device
         if(bias==None):
-            bias = torch.zeros((weights.shape[0],))
+            bias = torch.zeros((weights.shape[0],), device=device)
         self.kernel_size = weights.shape
         self.stride=stride
         self.padding=padding
@@ -294,23 +319,25 @@ class OpticalConvolution(nn.Module):
 
         weights = F.unfold(weights.float(), kernel_size=1)
         for i in range(weights.shape[0]):
-            weight=torch.cat([torch.flatten(weights[i]), torch.tensor([bias[i]])])
+            weight=torch.cat([torch.flatten(weights[i]), torch.tensor([bias[i]], device=device)])
             self.plcus.append(OpticalDotProduct(weight, cfg))
 
     def forward(self, tensor):
         shape = tensor.shape
         conv_dims=calculate_conv2d_output_size(shape[2], shape[3], self.kernel_size[2], self.kernel_size[3], self.stride, self.padding, self.dilation)
         ret_shape=(shape[0], self.kernel_size[0], conv_dims[0], conv_dims[1])
-        ret = torch.zeros(ret_shape)
+        ret = torch.zeros(ret_shape, device=tensor.device)
         tensor=tensor.float()
 
         for i in range(shape[0]):
             batch = tensor[i]
             channel_in=F.unfold(batch, self.kernel_size[2:4], self.dilation, self.padding, self.stride).T
-            channel_in=torch.cat([channel_in, torch.ones((channel_in.shape[0], 1))], dim=1)
+            channel_in=torch.cat([channel_in, torch.ones((channel_in.shape[0], 1), device=tensor.device)], dim=1)
             for j in range(self.kernel_size[0]):
                 res = self.plcus[j](channel_in)
                 res = F.fold(res.unsqueeze(0), output_size=ret_shape[2:], kernel_size=1, stride=1)[0]
+                # print(f"Res Shape: {res.shape}")
+                # print(f"Ret[ij] Shape: {ret[i][j].shape}")
                 ret[i][j] = res
         return ret
     
@@ -331,8 +358,8 @@ class OpticalFC(nn.Module):
     def forward(self, tensor):
         shape = tensor.shape
         ret_shape=(shape[0], self.kernel_size[0])
-        ret = torch.zeros(ret_shape)
-        tensor = torch.cat([tensor.float(), torch.ones([shape[0], 1]).float()], dim=1)
+        ret = torch.zeros(ret_shape, device=tensor.device)
+        tensor = torch.cat([tensor.float(), torch.ones([shape[0], 1], device=tensor.device).float()], dim=1)
         for i in range(ret_shape[1]):
             ret[:,i] = self.plcus[i](tensor)
         return ret

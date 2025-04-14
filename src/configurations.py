@@ -25,7 +25,7 @@ class ADCConfiguration(pydantic.BaseModel):
     
 class LaserConfiguration(pydantic.BaseModel):
     # What the voltage is multiplied by to get the optical power.
-    optical_gain: float = 0.1
+    optical_gain: float = 1.0
     
 class MZMConfiguration(pydantic.BaseModel):
     voltage_min: float = 0
@@ -44,7 +44,7 @@ class PDConfiguration(pydantic.BaseModel):
     pd_T: float = 300  # Temperature in Kelvin.
     pd_responsivity: float = 1.0  # In A/W.
     pd_dark_current_pA: float = 0  # In pA @ 1V.
-    pd_resistance: float = 50  # In Ohm. TODO: Not specified anywhere in the paper.
+    pd_resistance: float = 1.0  # In Ohm. TODO: Not specified anywhere in the paper.
 
 
     

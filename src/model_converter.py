@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from .kernels import * 
 from .configurations import *
 from tqdm import tqdm
+import math
 
 def get_image_net_mappings():
     labels_url = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
@@ -108,9 +109,11 @@ class Loader:
         model.eval()
         correct = 0
         total = 0
+        criterion = nn.CrossEntropyLoss(reduction='sum')
+        total_loss = 0
         with torch.no_grad():
             batch_idx = 0
-            num_batches = len(self.test_dataset)
+            num_batches = int(math.ceil(self.max_num_data_points / 64))
             for batch in tqdm(self.test_dataset, desc=("Testing custom="+str(custom))):
                 images = batch["image"].to(best_device())
                 labels = batch["label"].to(best_device())
@@ -118,11 +121,15 @@ class Loader:
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
+                loss = criterion(outputs, labels)
+                total_loss += loss.item()
                 if batch_idx % 10 == 0:
                     print(f"Correct: {correct}, Total: {total}, Current Acc: {100 * correct / total}, Batch: {batch_idx+1}/{num_batches}.")
+                
                 batch_idx += 1
         model_name = "custom" if custom else "original"
         print(f"Accuracy of the {model_name} model on the {self.dataset_name} test images: {100 * correct / total}%")
+        print(f"Total loss of {model_name}: {total_loss}")
         return 100 * correct / total
 
 
@@ -196,7 +203,13 @@ class Loader:
             "imagenet": "validation",
         }
 
-        ds = load_dataset(dataset_paths[dataset_name], split=f"{split_names[dataset_name]}[:{max_num_data_points}]")
+        ds = load_dataset(dataset_paths[dataset_name], split=f"{split_names[dataset_name]}", streaming=True)
+        # Limit the number of data points if specified
+        if max_num_data_points > 0:
+            ds = ds.take(max_num_data_points)
+        # Convert to regular dataset
+
+        
         mini_idents = ds.features['label'].names
         mini_idx_to_full_idx = {
             i: self.ident_to_full_idx[ident] for i, ident in enumerate(mini_idents)
@@ -213,18 +226,17 @@ class Loader:
             ]
             return batch
         ds = ds.map(transform_batch, batched=True)
-        ds.set_format(type='torch', columns=['image', 'label'])
+        # ds.set_format(type='torch', columns=['image', 'label'])
         test_dataset = DataLoader(ds, batch_size=64, shuffle=False)
-        print(f"Loaded {dataset_name} dataset with {len(test_dataset)} batches.")
-        i = 0
-        for batch in test_dataset:
-            images = batch['image']
-            labels = batch['label']
-            print(f"Images shape: {images.shape}")
-            print(f"Labels Shape: {labels.shape}")
-            i += 1
-            if i == 5:
-                break
+        # i = 0
+        # for batch in test_dataset:
+        #     images = batch['image']
+        #     labels = batch['label']
+        #     print(f"Images shape: {images.shape}")
+        #     print(f"Labels Shape: {labels.shape}")
+        #     i += 1
+        #     if i == 5:
+        #         break
         self.test_dataset = test_dataset
         return
 
