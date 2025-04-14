@@ -18,8 +18,9 @@ from datasets import load_dataset  # Hugging Face Datasets library
 import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
-from src.kernels import * 
-from src.configurations import *
+from kernels import * 
+from configurations import *
+from tqdm import tqdm
 
 def get_image_net_mappings():
     labels_url = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
@@ -110,7 +111,7 @@ class Loader:
         with torch.no_grad():
             batch_idx = 0
             num_batches = len(self.test_dataset)
-            for batch in self.test_dataset:
+            for batch in tqdm(self.test_dataset, desc=("Testing custom="+str(custom))):
                 images = batch["image"].to(best_device())
                 labels = batch["label"].to(best_device())
                 outputs = model(images)
@@ -231,7 +232,7 @@ class Loader:
 if __name__ == "__main__":
     # Example usage
     dataset_name = "mini-imagenet"  # Change this to "tiny-imagenet" or "imagenet" as needed
-    loader = Loader(dataset_name, max_num_data_points=100)
+    loader = Loader(dataset_name, max_num_data_points=20)
     loader.test_model_on_dataset(custom=True)
     loader.test_model_on_dataset(custom=False)
     # loader.test_model_on_dataset(custom=False)

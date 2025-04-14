@@ -12,12 +12,12 @@ from jaxtyping import Float, Bool
 import pydantic
 from typing import Optional
 import dotenv
-from src.configurations import *
+from configurations import *
 
 dotenv.load_dotenv()
 
 # Our imports
-from src.utils import (
+from utils import (
     dB_to_linear,
     BOLTZMANN_CONST,
     ELEMENTARY_CHARGE,
@@ -248,8 +248,14 @@ class OpticalDotProduct(nn.Module):
         return self.cfg
 
 def calculate_conv2d_output_size(input_height, input_width, kernel_height, kernel_width, stride, padding, dilation):
-    output_height = (input_height - dilation * (kernel_height - 1) - 1 + 2 * padding) // stride + 1
-    output_width = (input_width - dilation * (kernel_width - 1) - 1 + 2 * padding) // stride + 1
+    if(isinstance(padding, int)):
+        padding = (padding, padding)
+    if(isinstance(stride, int)):
+        stride = (stride, stride)
+    if(isinstance(dilation, int)):
+        dilation = (dilation, dilation)
+    output_height = (input_height - dilation[0] * (kernel_height - 1) - 1 + 2 * padding[0]) // stride[0] + 1
+    output_width = (input_width - dilation[1] * (kernel_width - 1) - 1 + 2 * padding[1]) // stride[1] + 1
     return output_height, output_width
 
 #weights = (Channels OUT, Channels IN, Kernel Y, Kernel X)
