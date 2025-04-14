@@ -45,12 +45,12 @@ class PDConfiguration(pydantic.BaseModel):
     pd_responsivity: float = 1.0  # In A/W.
     pd_dark_current_pA: float = 0  # In pA @ 1V.
     pd_resistance: float = 50  # In Ohm. TODO: Not specified anywhere in the paper.
+class TIAConfiguration(pydantic.BaseModel):
+    gain: Optional[float] = 1
 
 
     
 class OpticalDotProductConfiguration(pydantic.BaseModel):
-    tia_gain: Optional[float] = 1
-
     # Components that compose into the optical dot product for configuration...
     input_dac_cfg: DACConfiguration = DACConfiguration()
     weight_dac_cfg: DACConfiguration = DACConfiguration()
@@ -59,6 +59,7 @@ class OpticalDotProductConfiguration(pydantic.BaseModel):
     mrr_cfg: MRRConfiguration = MRRConfiguration()
     pd_cfg: PDConfiguration = PDConfiguration()
     adc_cfg: ADCConfiguration = ADCConfiguration()
+    tia_cfg: TIAConfiguration = TIAConfiguration()
 
     # TODO(Adriano) move all this configuration load/store stuff to a base class so we can and make it paramterizeable
     @staticmethod

@@ -155,6 +155,18 @@ class PD(nn.Module):
         noise_shot = torch.randn_like(tensor) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
         tensor = tensor * (1 + noise_shot)
         return tensor
+    
+class TIA(nn.Module):
+    """TIA"""
+
+    def __init__(
+        self,
+        cfg: PDConfiguration,
+    ):
+        super().__init__()
+        self.gain=cfg.gain
+    def forward(self, tensor):
+        return torch.abs(tensor), (tensor>=0).float()
 
 class OpticalDotProduct(nn.Module):
     @staticmethod
@@ -211,9 +223,10 @@ class OpticalDotProduct(nn.Module):
         self.pd_positive = PD(cfg=cfg.pd_cfg)
         self.pd_negative = PD(cfg=cfg.pd_cfg)
 
+        self.tia = TIA(cfg=cfg.tia_cfg)
+
         self.adc = ADC(cfg=cfg.adc_cfg)
 
-        self.tia_gain = cfg.tia_gain
         self.cfg = cfg  # Save to deal with overrides
 
     def forward(self, tensor):
@@ -230,8 +243,8 @@ class OpticalDotProduct(nn.Module):
         multiplied = self.mzm(input_tensor)
         accumulated = self.mrr(multiplied, tensor_positive_mask)
         output_current = self.pd_positive(accumulated[0])-self.pd_positive(accumulated[1])
-        output_voltage=output_current*self.tia_gain
-        output = self.adc(output_voltage)
+        output_voltage, negatives = self.tia(output_current)
+        output = self.adc(output_voltage)*(negatives*2-1)
         
         #Software Implemented transformation
         scale=1
