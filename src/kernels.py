@@ -12,6 +12,7 @@ from jaxtyping import Float, Bool
 import pydantic
 from typing import Optional
 import dotenv
+from src.configurations import *
 
 dotenv.load_dotenv()
 
@@ -24,13 +25,6 @@ from src.utils import (
 )
 
 
-class DACConfiguration(pydantic.BaseModel):
-    quantization_bitwidth: int = 8
-    voltage_min: int = 0
-    voltage_max: int = 255
-
-
-# TODO(From Dylan): Implement electrical cross talk
 class DAC(nn.Module):
     def __init__(
         self,
@@ -48,11 +42,6 @@ class DAC(nn.Module):
         return self.voltage_min + (self.voltage_max - self.voltage_min) * tensor
 
 
-# TODO(Adriano) we might want to move these to their own file some day
-class ADCConfiguration(pydantic.BaseModel):
-    quantization_bitwidth: int = 8
-    voltage_min: int = 0
-    voltage_max: int = 255
 
 
 # TODO(From Dylan): Implement electrical cross talk
@@ -73,12 +62,6 @@ class ADC(nn.Module):
         tensor = torch.round(tensor.clamp(0, 1) * self.max_q_val)
         return tensor
 
-
-class LaserConfiguration(pydantic.BaseModel):
-    # What the voltage is multiplied by to get the optical power.
-    optical_gain: float = 0.1
-
-
 class Laser(nn.Module):
     """
     Returns the power of the wave
@@ -93,14 +76,6 @@ class Laser(nn.Module):
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
         return tensor * self.optical_gain
-
-
-class MZMConfiguration(pydantic.BaseModel):
-    voltage_min: float = 0
-    voltage_max: float = 255
-    y_branch_loss_DB: float = 0
-    mzm_loss_DB: float = 0
-
 
 class MZM(nn.Module):
     """Mach-Zehnder Modulator."""
@@ -125,13 +100,6 @@ class MZM(nn.Module):
             / (self.voltage_max - self.voltage_min)
         )
         return ideal * self.y_branch_loss * self.mzm_loss
-
-
-class MRRConfiguration(pydantic.BaseModel):
-    mrr_k2: float = 0.03
-    mrr_fsr_nm: float = 16.1
-    mrr_loss_dB: float = 0
-
 
 class MRR(nn.Module):
     """Micro-ring resonator."""
@@ -161,16 +129,6 @@ class MRR(nn.Module):
         ret = stacked.sum(dim=2)
         return ret
 
-
-class PDConfiguration(pydantic.BaseModel):
-    pd_rin_DBCHZ: float = 0
-    pd_GHZ: float = 5
-    pd_T: float = 300  # Temperature in Kelvin.
-    pd_responsivity: float = 1.0  # In A/W.
-    pd_dark_current_pA: float = 0  # In pA @ 1V.
-    pd_resistance: float = 50  # In Ohm. TODO: Not specified anywhere in the paper.
-
-
 class PD(nn.Module):
     """Photo-diode"""
 
@@ -196,61 +154,6 @@ class PD(nn.Module):
         noise_shot = torch.randn_like(tensor) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
         tensor = tensor * (1 + noise_shot)
         return tensor
-
-
-class OpticalDotProductConfiguration(pydantic.BaseModel):
-    tia_gain: Optional[float] = 1
-
-    # Components that compose into the optical dot product for configuration...
-    input_dac_cfg: DACConfiguration = DACConfiguration()
-    weight_dac_cfg: DACConfiguration = DACConfiguration()
-    laser_cfg: LaserConfiguration = LaserConfiguration()
-    mzm_cfg: MZMConfiguration = MZMConfiguration()
-    mrr_cfg: MRRConfiguration = MRRConfiguration()
-    pd_cfg: PDConfiguration = PDConfiguration()
-    adc_cfg: ADCConfiguration = ADCConfiguration()
-
-    # TODO(Adriano) move all this configuration load/store stuff to a base class so we can and make it paramterizeable
-    @staticmethod
-    def configs_path() -> Path:
-        if os.environ.get("ALBIREO_CONFIG_PATH", None) is not None:
-            raise NotImplementedError("Config path is not implemented (would have issues with local path in testing scripts)") # fmt: skip
-        path = DEFAULT_CONFIG_PATH
-        if not path.exists():
-            raise FileNotFoundError(f"Config path {path} does not exist")
-        return path
-
-    #### Helper methods to save the config (you should always save to the `config/` folder) ####
-    def save_to_path(self, path: Path | str):
-        pydantic_yaml.to_yaml_file(path, self)
-
-    def save(self, name: str):
-        save_path = OpticalDotProductConfiguration.configs_path() / f"{name}.yaml"
-        if save_path.exists():
-            raise FileExistsError(f"Config file {save_path} already exists")
-        self.save_to_path(save_path)
-
-    #### Helper methods to load common configurations we have in the config folder ####
-    @staticmethod
-    def from_config_path(config_path: Path | str) -> OpticalDotProductConfiguration:
-        return pydantic_yaml.parse_yaml_raw_as(OpticalDotProductConfiguration, Path(config_path).read_text()) # fmt: skip
-
-    @staticmethod
-    def from_config_name(config_name: str) -> OpticalDotProductConfiguration:
-        configs_path = OpticalDotProductConfiguration.configs_path()
-        config_path = configs_path / f"{config_name}.yaml"
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file {config_path} does not exist")
-        return OpticalDotProductConfiguration.from_config_path(config_path)
-
-    @staticmethod
-    def from_default() -> OpticalDotProductConfiguration:
-        return OpticalDotProductConfiguration.from_config_name("default")
-
-    @staticmethod
-    def from_zero_noise_high_precision() -> OpticalDotProductConfiguration:
-        return OpticalDotProductConfiguration.from_config_name("zero_noise_high_precision") # fmt: skip
-
 
 class OpticalDotProduct(nn.Module):
     @staticmethod
@@ -359,11 +262,7 @@ class OpticalConvolution(nn.Module):
         bias=None,
         stride=1,
         padding=0,
-        dilation=1,
-        weight_quantization_bitwidth=8,
-        input_quantization_bitwidth=8,
-        output_quantization_bitwidth=10,
-        tia_gain=1
+        dilation=1
     ):
         super().__init__()
         if(bias==None):
@@ -377,7 +276,7 @@ class OpticalConvolution(nn.Module):
         weights = F.unfold(weights.float(), kernel_size=1)
         for i in range(weights.shape[0]):
             weight=torch.cat([torch.flatten(weights[i]), torch.tensor([bias[i]])])
-            self.plcus.append(OpticalDotProduct(weight, weight_quantization_bitwidth, input_quantization_bitwidth, output_quantization_bitwidth, tia_gain))
+            self.plcus.append(OpticalDotProduct(weight, OpticalDotProductConfiguration()))
 
     def forward(self, tensor):
         shape = tensor.shape
@@ -411,7 +310,7 @@ class OpticalFC(nn.Module):
         self.kernel_size = weights.shape
         self.plcus = []
         for i in weights:
-            self.plcus.append(OpticalDotProduct(i, weight_quantization_bitwidth, input_quantization_bitwidth, output_quantization_bitwidth, tia_gain))
+            self.plcus.append(OpticalDotProduct(i, OpticalDotProductConfiguration()))
 
     def forward(self, tensor):
         shape = tensor.shape
