@@ -18,6 +18,7 @@ finesse = pi * sqrt(1 - k^2) / (k^2) # formula from the paper.
 
 Finally:
 We will apply this finesse to the new configurations we experiment with.
+So crosstalk = (N_distinct / (2 * finesse))^2
 """
 
 from .configurations import OpticalDotProductConfiguration

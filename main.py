@@ -34,7 +34,7 @@ def test_end_to_end():
     config = make_configuration(
         n_columns=5,
         n_plcus=3,
-        n_bits=6,
+        n_bits=8,
         noisy=False
     )
     loader = Loader(dataset_name, max_num_data_points=4, config=config)
