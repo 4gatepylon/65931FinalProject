@@ -3,6 +3,9 @@ FinalProjectBenchmarkingOpticalSystems
 
 Please install with `conda create -n 65931-final-project python=3.12` followed by `conda activate 65931-final-project` followed by `pip3 install -r requirements.txt`
 
+Please look into https://github.com/amlatyrngom/cimloop to see our CiMLoop fork to integrate runtime calculations.
+
+**Deprecated Below:**
 Things to do as of 2025-04-04:
 1. Have a set of `nn.Module` objects to describe the architecture as defined in the paper. These should be parameterizeable.
     - Matrix-Vector dot product is the bare minimum to be supported
