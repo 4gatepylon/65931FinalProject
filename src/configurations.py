@@ -16,22 +16,22 @@ import dotenv
 class DACConfiguration(pydantic.BaseModel):
     quantization_bitwidth: int = 8
     voltage_min: int = 0
-    voltage_max: int = 255
+    voltage_max: int = 1
     
 class ADCConfiguration(pydantic.BaseModel):
     quantization_bitwidth: int = 8
     voltage_min: int = 0
-    voltage_max: int = 255
+    voltage_max: int = 1
     
 
 class LaserConfiguration(pydantic.BaseModel):
     # What the voltage is multiplied by to get the optical power.
-    optical_gain: float = 0.1#Not specified
+    optical_gain: float = 1e-8#Not specified
     awg_cross_talk_rate: float = 0.0 # NOTE: For inputs only; weights do not have cross-talk.
     
 class MZMConfiguration(pydantic.BaseModel):
     voltage_min: float = 0
-    voltage_max: float = 255
+    voltage_max: float = 1
     y_branch_loss_DB: float = 0.3
     mzm_loss_DB: float = 1.2
     
@@ -51,7 +51,7 @@ class PDConfiguration(pydantic.BaseModel):
 
 
 class TIAConfiguration(pydantic.BaseModel):
-    gain: Optional[float] = 1
+    gain: Optional[float] = 1e7
 
 
     
