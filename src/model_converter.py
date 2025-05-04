@@ -137,7 +137,7 @@ class Loader:
         with open(filename, "w") as f:
             f.write(results)
         print(f"Results saved to {filename}")
-        return final_acc
+        return filename
 
 
     def load_pretrained_model(self, dataset_name: str):
