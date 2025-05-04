@@ -18,9 +18,10 @@ from datasets import load_dataset  # Hugging Face Datasets library
 import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
-from kernels import * 
-from configurations import *
+from .kernels import * 
+from .configurations import *
 from tqdm import tqdm
+import json
 
 def get_image_net_mappings():
     labels_url = "https://storage.googleapis.com/download.tensorflow.org/data/imagenet_class_index.json"
@@ -75,7 +76,6 @@ def replace_layers(model: nn.Module, config: OpticalDotProductConfiguration) -> 
         for part in name.split('.')[:-1]:
             parent_module = getattr(parent_module, part)
         setattr(parent_module, name.split('.')[-1], replacement)
-        
     return model
 
 
@@ -85,13 +85,14 @@ def replace_layers(model: nn.Module, config: OpticalDotProductConfiguration) -> 
 
 
 class Loader:
-    def __init__(self, dataset_name: str, max_num_data_points: int = 100):
+    def __init__(self, dataset_name: str, max_num_data_points: int = 100, config: OpticalDotProductConfiguration = None):
         self.dataset_name = dataset_name.lower()
         self.max_num_data_points = max_num_data_points
         self.original_model = None
         self.test_dataset = None
         self.custom_model = None
         self.ident_to_full_idx, self.full_idx_to_ident = get_image_net_mappings()
+        self.config = config or OpticalDotProductConfiguration()
         self.load_dataset(self.dataset_name, max_num_data_points)
         self.load_pretrained_model(models.resnet18(pretrained=True))
         self.make_custom_model(OpticalDotProductConfiguration())
@@ -106,24 +107,37 @@ class Loader:
         # Send to GPU
         model.to(best_device())
         model.eval()
-        correct = 0
-        total = 0
+        total_correct = 0
+        total_results = 0
+        criterion = nn.CrossEntropyLoss()
+        total_loss = 0
         with torch.no_grad():
             batch_idx = 0
-            num_batches = len(self.test_dataset)
+            num_batches = int(math.ceil(self.max_num_data_points / 64))
             for batch in tqdm(self.test_dataset, desc=("Testing custom="+str(custom))):
                 images = batch["image"].to(best_device())
                 labels = batch["label"].to(best_device())
                 outputs = model(images)
                 _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+                total_results += labels.size(0)
+                total_correct += (predicted == labels).sum().item()
+                total_loss += criterion(outputs, labels).item()
                 if batch_idx % 10 == 0:
-                    print(f"Correct: {correct}, Total: {total}, Current Acc: {100 * correct / total}, Batch: {batch_idx+1}/{num_batches}.")
+                    acc = 100 * total_correct / total_results
+                    print(f"Total: {total_results}. Current Acc: {acc}, Loss: {total_loss}, Batch: {batch_idx+1}/{num_batches}.")
                 batch_idx += 1
         model_name = "custom" if custom else "original"
-        print(f"Accuracy of the {model_name} model on the {self.dataset_name} test images: {100 * correct / total}%")
-        return 100 * correct / total
+        final_acc = 100 * total_correct / total_results
+        results = {
+            'final_acc': final_acc,
+            'final_loss': total_loss,
+        }
+        filename = f"model_results_{model_name}_{self.dataset_name}_{self.max_num_data_points}_{self.config.name}.json"
+        results = json.dumps(results, indent=4)
+        with open(filename, "w") as f:
+            f.write(results)
+        print(f"Results saved to {filename}")
+        return filename
 
 
     def load_pretrained_model(self, model):
@@ -147,7 +161,7 @@ class Loader:
         from copy import deepcopy
         self.original_model.eval()
         self.custom_model = deepcopy(self.original_model)
-        self.custom_model = replace_layers(self.custom_model, config)
+        self.custom_model = replace_layers(self.custom_model, self.config)
         self.custom_model.eval()
         return
 
@@ -195,7 +209,12 @@ class Loader:
             "imagenet": "validation",
         }
 
-        ds = load_dataset(dataset_paths[dataset_name], split=f"{split_names[dataset_name]}[:{max_num_data_points}]")
+        ds = load_dataset(dataset_paths[dataset_name], split=f"{split_names[dataset_name]}", streaming=True)
+        # Limit the number of data points if specified
+        if max_num_data_points > 0:
+            ds = ds.take(max_num_data_points)
+        # Convert to regular dataset
+
         mini_idents = ds.features['label'].names
         mini_idx_to_full_idx = {
             i: self.ident_to_full_idx[ident] for i, ident in enumerate(mini_idents)
@@ -212,18 +231,8 @@ class Loader:
             ]
             return batch
         ds = ds.map(transform_batch, batched=True)
-        ds.set_format(type='torch', columns=['image', 'label'])
+        # ds.set_format(type='torch', columns=['image', 'label'])
         test_dataset = DataLoader(ds, batch_size=64, shuffle=False)
-        print(f"Loaded {dataset_name} dataset with {len(test_dataset)} batches.")
-        i = 0
-        for batch in test_dataset:
-            images = batch['image']
-            labels = batch['label']
-            print(f"Images shape: {images.shape}")
-            print(f"Labels Shape: {labels.shape}")
-            i += 1
-            if i == 5:
-                break
         self.test_dataset = test_dataset
         return
 

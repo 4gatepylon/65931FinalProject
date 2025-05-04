@@ -1,0 +1,17 @@
+  return torch._C._nn.im2col(input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride))
+Testing custom=True: 0it [00:00, ?it/s]
+Pre-Input Shape: torch.Size([12544, 148])
+Post-Input Shape: torch.Size([12544, 148])
+Pre-Output Shape: torch.Size([12544])
+Post-Output Shape: torch.Size([12544])
+Res Shape: torch.Size([112, 112])
+Ret[ij] Shape: torch.Size([112, 112])
+
+Testing custom=True: 0it [00:00, ?it/s]
+Pre-Input Shape: torch.Size([12544, 148])
+Post-Input Shape: torch.Size([12544, 148])
+Pre-Output Shape: torch.Size([12544])
+Post-Output Shape: torch.Size([12544, 12544])
+Res Shape: torch.Size([12544, 112, 112])
+Ret[ij] Shape: torch.Size([112, 112])
+Testing custom=True: 0it [00:06, ?it/s]

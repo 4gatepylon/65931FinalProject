@@ -7,7 +7,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config"
 BOLTZMANN_CONST = 1.380649e-23  # K_b
 ELEMENTARY_CHARGE = 1.60217663e-19
 
-def dB_to_linear(
+def loss_dB_to_linear(
     dB: float | Float[torch.Tensor, "N"],
 ) -> float | Float[torch.Tensor, "N"]:
     """
@@ -17,3 +17,15 @@ def dB_to_linear(
        factor = 10^(-L/10)
     """
     return 10 ** (-dB / 10)
+
+
+def crosstalk_DB_to_linear(
+    dB: float | Float[torch.Tensor, "N"],
+) -> float | Float[torch.Tensor, "N"]:
+    """
+    Convert a cross-talk value in decibels (dB) to a linear scale factor.
+
+    For a cross-talk L in dB, the linear efficiency factor is:
+       factor = 10^(L/10)
+    """
+    return 10 ** (dB / 10)

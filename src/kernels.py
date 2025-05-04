@@ -12,17 +12,29 @@ from jaxtyping import Float, Bool
 import pydantic
 from typing import Optional
 import dotenv
-from configurations import *
+from .configurations import *
 
 dotenv.load_dotenv()
 
 # Our imports
-from utils import (
-    dB_to_linear,
+from .utils import (
+    loss_dB_to_linear,
     BOLTZMANN_CONST,
     ELEMENTARY_CHARGE,
     DEFAULT_CONFIG_PATH,
 )
+
+
+def best_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
+
+
+device = best_device()
 
 
 class DAC(nn.Module):
@@ -73,9 +85,11 @@ class Laser(nn.Module):
     ):
         super().__init__()
         self.optical_gain = cfg.optical_gain
+        self.awg_cross_talk_rate = cfg.awg_cross_talk_rate
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
-        return tensor * self.optical_gain
+        return tensor * self.optical_gain * (1 + self.awg_cross_talk_rate)
+    
 
 class MZM(nn.Module):
     """Mach-Zehnder Modulator."""
@@ -90,8 +104,8 @@ class MZM(nn.Module):
         self.voltage_min = cfg.voltage_min
         self.voltage_max = cfg.voltage_max
 
-        self.mzm_loss = dB_to_linear(cfg.mzm_loss_DB)
-        self.y_branch_loss = dB_to_linear(cfg.y_branch_loss_DB)
+        self.mzm_loss = loss_dB_to_linear(cfg.mzm_loss_DB)
+        self.y_branch_loss = loss_dB_to_linear(cfg.y_branch_loss_DB)
 
     def forward(self, tensor):
         ideal = (
@@ -111,9 +125,8 @@ class MRR(nn.Module):
     ):
         super().__init__()
         self.weights_positive_mask = weights_positive_mask
-        self.mrr_loss = dB_to_linear(cfg.mrr_loss_dB)
-        self.mrr_k2 = cfg.mrr_k2
-        self.mrr_fsr_nm = cfg.mrr_fsr_nm
+        self.mrr_loss = loss_dB_to_linear(cfg.mrr_loss_dB)
+        self.mrr_cross_talk_rate = cfg.mrr_cross_talk_rate
 
     def forward(self, tensor, tensor_positive_mask):
         positive_mask = (self.weights_positive_mask^tensor_positive_mask^1).float()
@@ -126,6 +139,7 @@ class MRR(nn.Module):
         )
 
         stacked *= self.mrr_loss
+        stacked *= (1 + self.mrr_cross_talk_rate)
         #TODO(From Dylan): Implement optical cross talk (We still have powers seperated by wavelength at this point)
         ret = stacked.sum(dim=2)
         return ret
@@ -149,10 +163,10 @@ class PD(nn.Module):
         tensor = tensor * self.pd_responsivity
         tensor = tensor + self.pd_dark_current_pA
 
-        noise_thermal = torch.randn_like(tensor) * 4 * BOLTZMANN_CONST * self.pd_T * self.pd_HZ / self.pd_resistance # fmt: skip
+        noise_thermal = torch.randn_like(tensor, device=device) * 4 * BOLTZMANN_CONST * self.pd_T * self.pd_HZ / self.pd_resistance # fmt: skip
         tensor = tensor + noise_thermal
 
-        noise_shot = torch.randn_like(tensor) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
+        noise_shot = torch.randn_like(tensor, device=device) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
         tensor = tensor * (1 + noise_shot)
         return tensor
     
@@ -288,7 +302,7 @@ class OpticalConvolution(nn.Module):
     ):
         super().__init__()
         if(bias==None):
-            bias = torch.zeros((weights.shape[0],))
+            bias = torch.zeros((weights.shape[0],), device=device)
         self.kernel_size = weights.shape
         self.stride=stride
         self.padding=padding
@@ -297,20 +311,20 @@ class OpticalConvolution(nn.Module):
 
         weights = F.unfold(weights.float(), kernel_size=1)
         for i in range(weights.shape[0]):
-            weight=torch.cat([torch.flatten(weights[i]), torch.tensor([bias[i]])])
+            weight=torch.cat([torch.flatten(weights[i]), torch.tensor([bias[i]], device=device)])
             self.plcus.append(OpticalDotProduct(weight, cfg))
 
     def forward(self, tensor):
         shape = tensor.shape
         conv_dims=calculate_conv2d_output_size(shape[2], shape[3], self.kernel_size[2], self.kernel_size[3], self.stride, self.padding, self.dilation)
         ret_shape=(shape[0], self.kernel_size[0], conv_dims[0], conv_dims[1])
-        ret = torch.zeros(ret_shape)
+        ret = torch.zeros(ret_shape, device=device)
         tensor=tensor.float()
 
         for i in range(shape[0]):
             batch = tensor[i]
             channel_in=F.unfold(batch, self.kernel_size[2:4], self.dilation, self.padding, self.stride).T
-            channel_in=torch.cat([channel_in, torch.ones((channel_in.shape[0], 1))], dim=1)
+            channel_in=torch.cat([channel_in, torch.ones((channel_in.shape[0], 1), device=device)], dim=1)
             for j in range(self.kernel_size[0]):
                 res = self.plcus[j](channel_in)
                 res = F.fold(res.unsqueeze(0), output_size=ret_shape[2:], kernel_size=1, stride=1)[0]
@@ -334,8 +348,8 @@ class OpticalFC(nn.Module):
     def forward(self, tensor):
         shape = tensor.shape
         ret_shape=(shape[0], self.kernel_size[0])
-        ret = torch.zeros(ret_shape)
-        tensor = torch.cat([tensor.float(), torch.ones([shape[0], 1]).float()], dim=1)
+        ret = torch.zeros(ret_shape, device=device)
+        tensor = torch.cat([tensor.float(), torch.ones([shape[0], 1], device=device).float()], dim=1)
         for i in range(ret_shape[1]):
             ret[:,i] = self.plcus[i](tensor)
         return ret
