@@ -25,7 +25,7 @@ class ADCConfiguration(pydantic.BaseModel):
     
 class LaserConfiguration(pydantic.BaseModel):
     # What the voltage is multiplied by to get the optical power.
-    optical_gain: float = 1#Not specified
+    optical_gain: float = 0.1#Not specified
     
 class MZMConfiguration(pydantic.BaseModel):
     voltage_min: float = 0
