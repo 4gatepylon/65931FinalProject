@@ -10,7 +10,7 @@ def test_indiviual_dot_product():
     config = make_configuration(
         n_columns=5,
         n_plcus=3,
-        n_bits=8,
+        n_bits=7,
         noisy=False
     )
     test_weights = torch.randn((3, 10), device=device)
@@ -34,7 +34,7 @@ def test_end_to_end():
     config = make_configuration(
         n_columns=5,
         n_plcus=3,
-        n_bits=8,
+        n_bits=7,
         noisy=False
     )
     loader = Loader(dataset_name, max_num_data_points=4, config=config)

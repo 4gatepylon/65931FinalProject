@@ -26,7 +26,7 @@ class ADCConfiguration(pydantic.BaseModel):
 
 class LaserConfiguration(pydantic.BaseModel):
     # What the voltage is multiplied by to get the optical power.
-    optical_gain: float = 1.0
+    optical_gain: float = 0.01
     awg_cross_talk_rate: float = 0.0 # NOTE: For inputs only; weights do not have cross-talk.
     
 class MZMConfiguration(pydantic.BaseModel):
