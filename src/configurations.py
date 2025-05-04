@@ -63,6 +63,7 @@ class OpticalDotProductConfiguration(pydantic.BaseModel):
     pd_cfg: PDConfiguration = PDConfiguration()
     adc_cfg: ADCConfiguration = ADCConfiguration()
     tia_cfg: TIAConfiguration = TIAConfiguration()
+    name: str = "default"
 
     # TODO(Adriano) move all this configuration load/store stuff to a base class so we can and make it paramterizeable
     @staticmethod

@@ -74,6 +74,7 @@ def make_configuration(
     else:
         config.laser_cfg.awg_cross_talk_rate = 0
         config.mrr_cfg.mrr_cross_talk_rate = 0
+    config.name = f"n_columns_{n_columns}_n_plcus_{n_plcus}_n_bits_{n_bits}"
     return config
 
 
