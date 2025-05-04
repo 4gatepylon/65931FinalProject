@@ -339,3 +339,26 @@ class OpticalFC(nn.Module):
         for i in range(ret_shape[1]):
             ret[:,i] = self.plcus[i](tensor)
         return ret
+    
+    # Regular dot product.
+seed = 472
+torch.manual_seed(seed)
+np.random.seed(seed)
+input_tensor = torch.randint(-256, 256, (9,), dtype=torch.float)
+print(input_tensor)
+weight_tensor = (torch.rand((9,), dtype=torch.float) - 0.5) * 2
+weight_tensor[0] = 1 # For max to be 1
+print(weight_tensor)
+
+reference_result = torch.dot(input_tensor, weight_tensor)
+
+optical_dot_product = OpticalDotProduct(
+    weight_tensor,
+    OpticalDotProductConfiguration()
+)
+print("Reference result: ", reference_result)
+
+seed = torch.seed()&(2**32-1)
+torch.manual_seed(seed)
+np.random.seed(seed)
+print("Final output: ", optical_dot_product(input_tensor.unsqueeze(0)))

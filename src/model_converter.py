@@ -51,7 +51,7 @@ def best_device():
 
 
 
-def replace_layers(model: nn.Module) -> nn.Module:
+def replace_layers(model: nn.Module, config: OpticalDotProductConfiguration) -> nn.Module:
     """
     Replace all the fully connected and convolutional layers in the model with custom ones.
     Args:
@@ -62,13 +62,13 @@ def replace_layers(model: nn.Module) -> nn.Module:
     replacements = {}
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear):
-            replacements[name] = OpticalFC(module.weight, module.bias, OpticalDotProductConfiguration())
+            replacements[name] = OpticalFC(module.weight, module.bias, config)
         elif isinstance(module, nn.Conv2d):
             if(module.groups != 1):
                 raise Exception('Groups neq 1 not supported')
             if(module.padding_mode != "zeros"):
                 raise Exception('padding_mode neq \'zeros\' not supported')
-            replacements[name] = OpticalConvolution(module.weight, OpticalDotProductConfiguration(), module.bias, module.stride, module.padding, module.dilation)
+            replacements[name] = OpticalConvolution(module.weight, config, module.bias, module.stride, module.padding, module.dilation)
     for name, replacement in replacements.items():
         # Replace the original module with the custom one
         parent_module = model
@@ -93,8 +93,8 @@ class Loader:
         self.custom_model = None
         self.ident_to_full_idx, self.full_idx_to_ident = get_image_net_mappings()
         self.load_dataset(self.dataset_name, max_num_data_points)
-        self.load_pretrained_model(self.dataset_name)
-        self.make_custom_model()
+        self.load_pretrained_model(models.resnet18(pretrained=True))
+        self.make_custom_model(OpticalDotProductConfiguration())
 
 
 
@@ -126,20 +126,19 @@ class Loader:
         return 100 * correct / total
 
 
-    def load_pretrained_model(self, dataset_name: str):
+    def load_pretrained_model(self, model):
         """
         Loads a pretrained ResNet18 model according to the dataset.
         
         - For "mini-imagenet" or "tiny-imagenet": Uses the standard torchvision pretrained ResNet18 (on ImageNet).
         """
-        dataset_name = dataset_name.lower()
-        self.original_model = models.resnet18(pretrained=True)
+        self.original_model = model
         self.original_model.eval()
         self.original_model.to(best_device())
         return
 
 
-    def make_custom_model(self):
+    def make_custom_model(self, config: OpticalDotProductConfiguration):
         """
         Replaces the original model's layers with custom ones.
         Returns:
@@ -148,7 +147,7 @@ class Loader:
         from copy import deepcopy
         self.original_model.eval()
         self.custom_model = deepcopy(self.original_model)
-        self.custom_model = replace_layers(self.custom_model)
+        self.custom_model = replace_layers(self.custom_model, config)
         self.custom_model.eval()
         return
 
@@ -233,6 +232,9 @@ if __name__ == "__main__":
     # Example usage
     dataset_name = "mini-imagenet"  # Change this to "tiny-imagenet" or "imagenet" as needed
     loader = Loader(dataset_name, max_num_data_points=20)
+    loader.load_pretrained_model(models.resnet18(pretrained=True))
+    loader.make_custom_model(OpticalDotProductConfiguration.from_config_path("config/scripted/WDAC8_IDAC8_ADC8.yaml"))
+
     loader.test_model_on_dataset(custom=True)
     loader.test_model_on_dataset(custom=False)
     # loader.test_model_on_dataset(custom=False)
