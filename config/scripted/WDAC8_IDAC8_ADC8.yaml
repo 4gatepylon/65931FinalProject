@@ -7,7 +7,7 @@ input_dac_cfg:
   voltage_max: 255
   voltage_min: 0
 laser_cfg:
-  optical_gain: 1.0
+  optical_gain: 0.1
 mrr_cfg:
   mrr_fsr_nm: 16.1
   mrr_k2: 0.03
