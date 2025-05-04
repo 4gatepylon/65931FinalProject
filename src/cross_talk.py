@@ -55,11 +55,8 @@ def make_configuration(
     # Set the base configuration
     config = OpticalDotProductConfiguration()
     config.input_dac_cfg.quantization_bitwidth = n_bits
-    config.input_dac_cfg.voltage_max = 2 ** n_bits - 1
     config.weight_dac_cfg.quantization_bitwidth = n_bits
-    config.weight_dac_cfg.voltage_max = 2 ** n_bits - 1
     config.adc_cfg.quantization_bitwidth = n_bits
-    config.mzm_cfg.voltage_max = 2 ** n_bits - 1
 
     # Cross-talk specific configuration
     distinct_plcu_inputs = 3 * (3 + n_columns - 1)
