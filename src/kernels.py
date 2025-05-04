@@ -12,12 +12,12 @@ from jaxtyping import Float, Bool
 import pydantic
 from typing import Optional
 import dotenv
-from .configurations import *
+from configurations import *
 
 dotenv.load_dotenv()
 
 # Our imports
-from .utils import (
+from utils import (
     loss_dB_to_linear,
     BOLTZMANN_CONST,
     ELEMENTARY_CHARGE,
@@ -165,7 +165,6 @@ class PD(nn.Module):
 
         noise_thermal = torch.randn_like(tensor, device=device) * 4 * BOLTZMANN_CONST * self.pd_T * self.pd_HZ / self.pd_resistance # fmt: skip
         tensor = tensor + noise_thermal
-
         noise_shot = torch.randn_like(tensor, device=device) * (2 * ELEMENTARY_CHARGE * self.pd_HZ)
         tensor = tensor * (1 + noise_shot)
         return tensor
@@ -175,12 +174,13 @@ class TIA(nn.Module):
 
     def __init__(
         self,
-        cfg: PDConfiguration,
+        cfg: TIAConfiguration,
     ):
         super().__init__()
         self.gain=cfg.gain
+        
     def forward(self, tensor):
-        return torch.abs(tensor), (tensor>=0).float()
+        return torch.abs(tensor*self.gain), (tensor>=0).float()
 
 class OpticalDotProduct(nn.Module):
     @staticmethod
@@ -264,7 +264,7 @@ class OpticalDotProduct(nn.Module):
         scale=1
         scale*=self.weights_normalization
         scale/=2**(self.adc.quantization_bitwidth-self.input_DAC.quantization_bitwidth)
-        scale/=self.laser.optical_gain * self.mrr.mrr_loss * self.mzm.y_branch_loss*self.mzm.mzm_loss
+        scale/=self.laser.optical_gain*self.tia.gain * self.mrr.mrr_loss * self.mzm.y_branch_loss*self.mzm.mzm_loss
         scale/=(self.pd_positive.pd_responsivity+self.pd_negative.pd_responsivity)/2
         scale/=(2**self.input_DAC.quantization_bitwidth - 1)
         scale*=input_normalization

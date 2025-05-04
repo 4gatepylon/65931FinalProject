@@ -94,8 +94,8 @@ class Loader:
         self.ident_to_full_idx, self.full_idx_to_ident = get_image_net_mappings()
         self.config = config or OpticalDotProductConfiguration()
         self.load_dataset(self.dataset_name, max_num_data_points)
-        self.load_pretrained_model(self.dataset_name)
-        self.make_custom_model()
+        self.load_pretrained_model(models.resnet18(pretrained=True))
+        self.make_custom_model(OpticalDotProductConfiguration())
 
 
 
@@ -140,20 +140,19 @@ class Loader:
         return filename
 
 
-    def load_pretrained_model(self, dataset_name: str):
+    def load_pretrained_model(self, model):
         """
         Loads a pretrained ResNet18 model according to the dataset.
         
         - For "mini-imagenet" or "tiny-imagenet": Uses the standard torchvision pretrained ResNet18 (on ImageNet).
         """
-        dataset_name = dataset_name.lower()
-        self.original_model = models.resnet18(pretrained=True)
+        self.original_model = model
         self.original_model.eval()
         self.original_model.to(best_device())
         return
 
 
-    def make_custom_model(self):
+    def make_custom_model(self, config: OpticalDotProductConfiguration):
         """
         Replaces the original model's layers with custom ones.
         Returns:
@@ -242,6 +241,9 @@ if __name__ == "__main__":
     # Example usage
     dataset_name = "mini-imagenet"  # Change this to "tiny-imagenet" or "imagenet" as needed
     loader = Loader(dataset_name, max_num_data_points=20)
+    loader.load_pretrained_model(models.resnet18(pretrained=True))
+    loader.make_custom_model(OpticalDotProductConfiguration.from_config_path("config/scripted/WDAC8_IDAC8_ADC8.yaml"))
+
     loader.test_model_on_dataset(custom=True)
     loader.test_model_on_dataset(custom=False)
     # loader.test_model_on_dataset(custom=False)
