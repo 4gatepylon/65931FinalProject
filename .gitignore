@@ -176,3 +176,5 @@ cython_debug/
 
 # Custom
 **/torch_data
+
+essai.txt

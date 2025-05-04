@@ -23,9 +23,11 @@ class ADCConfiguration(pydantic.BaseModel):
     voltage_min: int = 0
     voltage_max: int = 255
     
+
 class LaserConfiguration(pydantic.BaseModel):
     # What the voltage is multiplied by to get the optical power.
-    optical_gain: float = 0.1
+    optical_gain: float = 1.0
+    awg_cross_talk_rate: float = 0.0 # NOTE: For inputs only; weights do not have cross-talk.
     
 class MZMConfiguration(pydantic.BaseModel):
     voltage_min: float = 0
@@ -34,9 +36,8 @@ class MZMConfiguration(pydantic.BaseModel):
     mzm_loss_DB: float = 0
     
 class MRRConfiguration(pydantic.BaseModel):
-    mrr_k2: float = 0.03
-    mrr_fsr_nm: float = 16.1
     mrr_loss_dB: float = 0
+    mrr_cross_talk_rate: float = 0.0
 
 class PDConfiguration(pydantic.BaseModel):
     pd_rin_DBCHZ: float = 0
@@ -44,7 +45,9 @@ class PDConfiguration(pydantic.BaseModel):
     pd_T: float = 300  # Temperature in Kelvin.
     pd_responsivity: float = 1.0  # In A/W.
     pd_dark_current_pA: float = 0  # In pA @ 1V.
-    pd_resistance: float = 50  # In Ohm. TODO: Not specified anywhere in the paper.
+    pd_resistance: float = 1.0  # In Ohm. TODO: Not specified anywhere in the paper.
+
+
 class TIAConfiguration(pydantic.BaseModel):
     gain: Optional[float] = 1
 
