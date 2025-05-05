@@ -132,7 +132,7 @@ class Loader:
             'final_acc': final_acc,
             'final_loss': total_loss,
         }
-        filename = f"model_results_{model_name}_{self.dataset_name}_{self.max_num_data_points}_{self.config.name}.json"
+        filename = f"isolated_model_results_{model_name}_{self.dataset_name}_{self.max_num_data_points}_{self.config.name}.json"
         results = json.dumps(results, indent=4)
         with open(filename, "w") as f:
             f.write(results)
