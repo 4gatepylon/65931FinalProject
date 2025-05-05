@@ -1,0 +1,16 @@
+architecture,full_architecture,accuracy,cross_entropy_loss,ordering,architecture_type
+Original FP32,Original FP32,79.0,3.257188379764557,0,Noiseless
+Noiseless 4 bits,Noiseless 4 bits,66.0,4.877492785453796,1,Noiseless
+Noiseless 8 bits,Noiseless 8 bits,73.5,4.052099645137787,2,Noiseless
+"3 Columns, 3 PLCUs, 4 bits","3 Columns, 3 PLCUs, 4 bits, Low",69.0,4.578237950801849,3,Low Sensitivity
+"3 Columns, 3 PLCUs, 8 bits","3 Columns, 3 PLCUs, 8 bits, Low",73.0,4.002639830112457,4,Low Sensitivity
+"5 Columns, 3 PLCUs, 4 bits","5 Columns, 3 PLCUs, 4 bits, Low",69.0,4.607595264911652,5,Low Sensitivity
+"5 Columns, 3 PLCUs, 8 bits","5 Columns, 3 PLCUs, 8 bits, Low",71.5,3.966749370098114,6,Low Sensitivity
+"7 Columns, 3 PLCUs, 4 bits","7 Columns, 3 PLCUs, 4 bits, Low",65.5,4.729468643665314,7,Low Sensitivity
+"7 Columns, 3 PLCUs, 8 bits","7 Columns, 3 PLCUs, 8 bits, Low",72.0,3.9248602986335754,8,Low Sensitivity
+"3 Columns, 3 PLCUs, 4 bits","3 Columns, 3 PLCUs, 4 bits, High",67.0,4.607908725738525,9,High Sensitivity
+"3 Columns, 3 PLCUs, 8 bits","3 Columns, 3 PLCUs, 8 bits, High",72.5,3.905653655529022,10,High Sensitivity
+"5 Columns, 3 PLCUs, 4 bits","5 Columns, 3 PLCUs, 4 bits, High",69.0,4.493961989879608,11,High Sensitivity
+"5 Columns, 3 PLCUs, 8 bits","5 Columns, 3 PLCUs, 8 bits, High",70.5,4.219296336174011,12,High Sensitivity
+"7 Columns, 3 PLCUs, 4 bits","7 Columns, 3 PLCUs, 4 bits, High",59.0,6.298740983009338,13,High Sensitivity
+"7 Columns, 3 PLCUs, 8 bits","7 Columns, 3 PLCUs, 8 bits, High",65.0,5.505545377731323,14,High Sensitivity
