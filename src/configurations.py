@@ -16,12 +16,12 @@ import dotenv
 class DACConfiguration(pydantic.BaseModel):
     quantization_bitwidth: int = 8
     voltage_min: float = 0
-    voltage_max: float = 1
+    voltage_max: float = 1.0
     
 class ADCConfiguration(pydantic.BaseModel):
     quantization_bitwidth: int = 8
     voltage_min: float = 0
-    voltage_max: float = 1
+    voltage_max: float = 8.0
     
 
 class LaserConfiguration(pydantic.BaseModel):

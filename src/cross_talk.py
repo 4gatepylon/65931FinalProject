@@ -33,7 +33,7 @@ def awg_paper_finesse(adjacent_crosstalk_db: float = -34) -> float:
     paper_N = 63
     return paper_N / (2 * crosstalk_rate ** 0.5)
 
-def mrr_paper_finesse(k_squared: float = 0.02) -> float:
+def mrr_paper_finesse(k_squared: float = 0.03) -> float:
     """ Approximate formula to get the finesse of the MRR in the paper. """
     return pi * sqrt(1 - k_squared) / (k_squared)
 
@@ -48,6 +48,7 @@ def make_configuration(
     n_plcus: int,
     n_bits: int,
     noisy: bool = False,
+    sensitive: bool = False,
 ):
     """
     Create a configuration for the cross-talk model.
@@ -61,17 +62,19 @@ def make_configuration(
     # Cross-talk specific configuration
     distinct_plcu_inputs = 3 * (3 + n_columns - 1)
     distinct_awg_inputs = n_plcus * distinct_plcu_inputs
-    mrr_finesse = mrr_paper_finesse()
+    k_squared = 0.03 if sensitive else 0.02
+    mrr_finesse = mrr_paper_finesse(k_squared=k_squared)
     awg_finesse = awg_paper_finesse()
     mrr_cross_talk = compute_crosstalk(mrr_finesse, distinct_plcu_inputs)
     awg_cross_talk = compute_crosstalk(awg_finesse, distinct_awg_inputs)
     if noisy:
         config.laser_cfg.awg_cross_talk_rate = awg_cross_talk
         config.mrr_cfg.mrr_cross_talk_rate = mrr_cross_talk
+        config.name = f"n_columns_{n_columns}_n_plcus_{n_plcus}_n_bits_{n_bits}"
     else:
         config.laser_cfg.awg_cross_talk_rate = 0
         config.mrr_cfg.mrr_cross_talk_rate = 0
-    config.name = f"n_columns_{n_columns}_n_plcus_{n_plcus}_n_bits_{n_bits}"
+        config.name = f"n_bits_{n_bits}_no_noise"
     return config
 
 

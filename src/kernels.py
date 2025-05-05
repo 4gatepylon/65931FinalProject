@@ -60,7 +60,6 @@ class DAC(nn.Module):
 
 
 
-# TODO(From Dylan): Implement electrical cross talk
 class ADC(nn.Module):
     def __init__(
         self,
@@ -74,9 +73,14 @@ class ADC(nn.Module):
         self.max_q_val = 2**cfg.quantization_bitwidth - 1
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
-        # tensor = (tensor - self.voltage_min) / (self.voltage_max - self.voltage_min)
-        # tensor = torch.round(tensor.clamp(0, 1) * self.max_q_val)
-        tensor = torch.round(torch.clamp(tensor, 0, self.max_q_val))
+        """
+        Simulate precision loss in ADC.
+        Caused by clamping to the voltage range, then rounding for quantization.
+        """
+        # Assume voltage_min is simply 0.
+        tensor = tensor.clamp(0, self.voltage_max)
+        scaling_factor = (self.max_q_val / self.voltage_max)
+        tensor = torch.round(tensor * scaling_factor) / scaling_factor
         return tensor
 
 class Laser(nn.Module):
@@ -91,9 +95,25 @@ class Laser(nn.Module):
         super().__init__()
         self.optical_gain = cfg.optical_gain
         self.awg_cross_talk_rate = cfg.awg_cross_talk_rate
+        # X = X + sum(surrounding X * cross_talk_rate) 
+        self.cross_talk_kernel = torch.tensor([
+           self.awg_cross_talk_rate/4, self.awg_cross_talk_rate, 1.0, self.awg_cross_talk_rate, self.awg_cross_talk_rate/4
+        ], device=device).view(1, 1, -1)
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
-        return tensor * self.optical_gain * (1 + self.awg_cross_talk_rate)
+        tensor = tensor * self.optical_gain
+        # Tensor is NxM
+        # Each of the N rows receives the 1D convolution
+        # with the cross talk kernel
+        tensor = tensor.unsqueeze(1)
+        tensor = F.conv1d(
+            tensor,
+            self.cross_talk_kernel,
+            padding='same',
+            groups=1,
+        )
+        tensor = tensor.squeeze(1)
+        return tensor
     
 
 class MZM(nn.Module):
@@ -132,20 +152,33 @@ class MRR(nn.Module):
         self.weights_positive_mask = weights_positive_mask
         self.mrr_loss = loss_dB_to_linear(cfg.mrr_loss_dB)
         self.mrr_cross_talk_rate = cfg.mrr_cross_talk_rate
+        self.cross_talk_kernel = torch.tensor([
+            self.mrr_cross_talk_rate/4, self.mrr_cross_talk_rate, 1.0, self.mrr_cross_talk_rate, self.mrr_cross_talk_rate/4
+        ], device=device).view(1, 1, -1)
 
     def forward(self, tensor, tensor_positive_mask):
         positive_mask = (self.weights_positive_mask^tensor_positive_mask^1).float()
+        positive_tensor = tensor * positive_mask
+        negative_tensor = tensor * (1 - positive_mask)
         stacked = torch.stack(
             [
-                tensor * positive_mask,
-                tensor * (1 - positive_mask),
+                positive_tensor,
+                negative_tensor,
             ],
             dim=0,
         )
-
+        # Apply cross talk
+        B, R, C = stacked.shape
+        stacked = stacked.reshape(B * R, 1, C)
+        stacked = F.conv1d(
+            stacked,
+            self.cross_talk_kernel,
+            padding='same',
+            groups=1,
+        )
+        stacked = stacked.squeeze(1).reshape(B, R, C)
+        # Apply loss
         stacked *= self.mrr_loss
-        stacked *= (1 + self.mrr_cross_talk_rate)
-        #TODO(From Dylan): Implement optical cross talk (We still have powers seperated by wavelength at this point)
         ret = stacked.sum(dim=2)
         return ret
 
