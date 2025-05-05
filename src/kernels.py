@@ -12,12 +12,12 @@ from jaxtyping import Float, Bool
 import pydantic
 from typing import Optional
 import dotenv
-from configurations import *
+from .configurations import *
 
 dotenv.load_dotenv()
 
 # Our imports
-from utils import (
+from .utils import (
     loss_dB_to_linear,
     BOLTZMANN_CONST,
     ELEMENTARY_CHARGE,
@@ -41,15 +41,19 @@ class DAC(nn.Module):
     def __init__(
         self,
         cfg: DACConfiguration,
+        is_weight: bool = False,
     ):
         super().__init__()
         self.quantization_bitwidth = cfg.quantization_bitwidth
         self.voltage_min = cfg.voltage_min
         self.voltage_max = cfg.voltage_max
-
+        self.is_weight = is_weight
         self.max_q_val = 2**cfg.quantization_bitwidth - 1
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
+        if self.is_weight:
+            return tensor # Keep in [-1, 1]
+        # Assumes input is already quantized.
         tensor = torch.round(tensor.clamp(0, self.max_q_val)) / self.max_q_val
         return self.voltage_min + (self.voltage_max - self.voltage_min) * tensor
 
@@ -70,8 +74,9 @@ class ADC(nn.Module):
         self.max_q_val = 2**cfg.quantization_bitwidth - 1
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
-        tensor = (tensor - self.voltage_min) / (self.voltage_max - self.voltage_min)
-        tensor = torch.round(tensor.clamp(0, 1) * self.max_q_val)
+        # tensor = (tensor - self.voltage_min) / (self.voltage_max - self.voltage_min)
+        # tensor = torch.round(tensor.clamp(0, 1) * self.max_q_val)
+        tensor = torch.round(torch.clamp(tensor, 0, self.max_q_val))
         return tensor
 
 class Laser(nn.Module):
@@ -110,7 +115,7 @@ class MZM(nn.Module):
     def forward(self, tensor):
         ideal = (
             tensor
-            * (self.weights - self.voltage_min)
+            * self.weights
             / (self.voltage_max - self.voltage_min)
         )
         return ideal * self.y_branch_loss * self.mzm_loss
@@ -178,7 +183,7 @@ class TIA(nn.Module):
     ):
         super().__init__()
         self.gain=cfg.gain
-        
+
     def forward(self, tensor):
         return torch.abs(tensor*self.gain), (tensor>=0).float()
 
@@ -193,9 +198,10 @@ class OpticalDotProduct(nn.Module):
         if weights_normalization <= 1e-9:
             weights_normalization = 1
         # Update/transform the weights
-        weights = torch.round(
-            (weights / weights_normalization) * (2**weight_quantization_bitwidth - 1)
-        )
+        # weights = torch.round(
+        #     (weights / weights_normalization) * (2**weight_quantization_bitwidth - 1)
+        # )
+        weights = weights / weights_normalization
         # Return these settings
         return weights_normalization, weights
 
@@ -227,7 +233,7 @@ class OpticalDotProduct(nn.Module):
         self.weights_normalization, weights_transformed = self.software_implemented_transformation(weights, cfg.weight_dac_cfg.quantization_bitwidth) # fmt: skip
 
         self.input_DAC = DAC(cfg=cfg.input_dac_cfg)
-        self.weight_DAC = DAC(cfg=cfg.weight_dac_cfg)
+        self.weight_DAC = DAC(cfg=cfg.weight_dac_cfg, is_weight=True)
         self.weight_tensor = self.weight_DAC(torch.abs(weights_transformed))
 
         self.laser = Laser(cfg=cfg.laser_cfg)
@@ -266,7 +272,7 @@ class OpticalDotProduct(nn.Module):
         scale/=2**(self.adc.quantization_bitwidth-self.input_DAC.quantization_bitwidth)
         scale/=self.laser.optical_gain*self.tia.gain * self.mrr.mrr_loss * self.mzm.y_branch_loss*self.mzm.mzm_loss
         scale/=(self.pd_positive.pd_responsivity+self.pd_negative.pd_responsivity)/2
-        scale/=(2**self.input_DAC.quantization_bitwidth - 1)
+        # scale/=(2**self.input_DAC.quantization_bitwidth - 1)
         scale*=input_normalization
         scale=scale.T[0]
 
@@ -290,7 +296,7 @@ def calculate_conv2d_output_size(input_height, input_width, kernel_height, kerne
 #weights = (Channels OUT, Channels IN, Kernel Y, Kernel X)
 #inputs = (Batch, Channels IN, Y, X)
 #output = (Batch, Channels OUT, Y OUT, X OUT)
-class OpticalConvolution(nn.Module):
+class BackupOpticalConvolution(nn.Module):
     def __init__(
         self,
         weights,
@@ -331,7 +337,7 @@ class OpticalConvolution(nn.Module):
                 ret[i][j] = res
         return ret
     
-class OpticalFC(nn.Module):
+class BackupOpticalFC(nn.Module):
     def __init__(
         self,
         weights,
@@ -353,3 +359,137 @@ class OpticalFC(nn.Module):
         for i in range(ret_shape[1]):
             ret[:,i] = self.plcus[i](tensor)
         return ret
+    
+
+
+
+class OpticalConvolution(nn.Module):
+    def __init__(
+        self,
+        weights: Float[torch.Tensor, "Out Cin Kh Kw"], # Standard Conv weights
+        cfg: OpticalDotProductConfiguration,
+        bias: Optional[Float[torch.Tensor, "Out"]] = None,
+        stride: t.Union[int, t.Tuple[int, int]] = 1,
+        padding: t.Union[int, t.Tuple[int, int]] = 0,
+        dilation: t.Union[int, t.Tuple[int, int]] = 1,
+    ):
+        super().__init__()
+        self.out_channels, self.in_channels, self.kernel_h, self.kernel_w = weights.shape
+        self.kernel_size = (self.kernel_h, self.kernel_w)
+        self.stride = stride # Store for fold calculation if needed, pass to Unfold
+        self.padding = padding
+        self.dilation = dilation
+        self.cfg = cfg
+
+        if bias is None:
+            bias = torch.zeros(self.out_channels, device=weights.device) # Ensure bias exists
+
+        # 1. Prepare weights for the equivalent FC layer
+        # Flatten C_in, KH, KW dimensions
+        weights_flat = weights.view(self.out_channels, -1) # Shape: (Out, Cin*Kh*Kw)
+
+        # 2. Instantiate the optimized OpticalFC layer
+        # OpticalFC handles augmenting weights with bias internally
+        self.optical_fc = OpticalFC(weights=weights_flat, biases=bias, cfg=cfg)
+
+        # 3. Store parameters for Unfold and Fold
+        # Unfold extracts patches based on conv parameters
+        self.unfold = nn.Unfold(
+            kernel_size=self.kernel_size,
+            dilation=self.dilation,
+            padding=self.padding,
+            stride=self.stride
+        )
+
+    def forward(self, tensor: Float[torch.Tensor, "B Cin Hin Win"]):
+        # Inference only optimization
+        B, C_in, H_in, W_in = tensor.shape
+        if C_in != self.in_channels:
+                raise ValueError(f"Input channels {C_in} != expected {self.in_channels}")
+
+        # Calculate output spatial dimensions needed for Fold
+        # Note: Ensure padding is handled correctly (tuple vs int)
+        padding_tuple = self.padding if isinstance(self.padding, tuple) else (self.padding, self.padding)
+        stride_tuple = self.stride if isinstance(self.stride, tuple) else (self.stride, self.stride)
+        dilation_tuple = self.dilation if isinstance(self.dilation, tuple) else (self.dilation, self.dilation)
+
+        H_out = math.floor((H_in + 2 * padding_tuple[0] - dilation_tuple[0] * (self.kernel_h - 1) - 1) / stride_tuple[0] + 1)
+        W_out = math.floor((W_in + 2 * padding_tuple[1] - dilation_tuple[1] * (self.kernel_w - 1) - 1) / stride_tuple[1] + 1)
+        output_size = (H_out, W_out)
+
+        # 1. Unfold: Extract patches (im2col)
+        # Input: (B, Cin, Hin, Win)
+        # Output: (B, Cin*Kh*Kw, L), where L = Hout * Wout
+        patches = self.unfold(tensor.float())
+        L = patches.shape[2] # Number of patches
+
+        # 2. Prepare for OpticalFC:
+        # Transpose and reshape patches: (B, Cin*Kh*Kw, L) -> (B, L, Cin*Kh*Kw) -> (B*L, Cin*Kh*Kw)
+        in_features_fc = patches.shape[1] # Cin*Kh*Kw
+        patches_fc_input = patches.transpose(1, 2).reshape(-1, in_features_fc)
+
+        # 3. Apply OpticalFC
+        # Input: (B*L, Cin*Kh*Kw) -> OpticalFC augments with bias internally
+        # Output: (B*L, Cout)
+        output_fc = self.optical_fc(patches_fc_input) # OpticalFC already handles augmented input/weights
+
+        # 4. Fold: Reshape output back to spatial format (col2im)
+        # Need to reshape output_fc (B*L, Cout) -> (B, L, Cout) -> (B, Cout, L)
+        output_fc_reshaped = output_fc.view(B, L, self.out_channels).transpose(1, 2) # Shape: (B, Cout, L)
+
+        # Fold requires input (B, Cout*Kh*Kw_fold, L). Our "fold kernel" is 1x1.
+        # So input shape (B, Cout, L) is correct.
+        # Fold requires kernel_size matching the *original* convolution for mapping locations correctly.
+        # However, F.fold seems designed to reverse F.unfold directly. Let's test with kernel_size=1 for fold.
+        # According to docs, fold sums overlapping blocks. unfold -> mm -> fold is the standard way.
+        # Let's use kernel_size=(1,1) for fold as we are placing single values (Cout dims) at each location L.
+
+        # output = F.fold(output_fc_reshaped, output_size=output_size, kernel_size=(1, 1), stride=(1,1)) # Does fold need stride? yes.
+        # F.fold might not be the right tool here if the goal is just reshaping.
+        # Let's manually reshape and permute like in the first example solution.
+
+        # Reshape from (B*L, Cout) -> (B, L, Cout) -> (B, Hout, Wout, Cout)
+        output_spatial = output_fc.view(B, H_out, W_out, self.out_channels)
+        # Permute to (B, Cout, Hout, Wout)
+        output = output_spatial.permute(0, 3, 1, 2).contiguous()
+
+        return output
+
+
+
+class OpticalFC(nn.Module):
+    def __init__(
+        self,
+        weights: Float[torch.Tensor, "Out In"],
+        biases: Float[torch.Tensor, "Out"],
+        cfg: OpticalDotProductConfiguration
+    ):
+        super().__init__()
+        self.out_features, self.in_features = weights.shape
+        self.cfg = cfg
+
+        # Augment weights with biases for combined dot product
+        # Each OpticalDotProduct unit will handle one augmented row
+        augmented_weights = torch.cat([weights.float(), biases.unsqueeze(1).float()], dim=1) # Shape: (Out, In + 1)
+
+        # Create a ModuleList of OpticalDotProduct units, one for each output feature
+        self.optical_dots = nn.ModuleList(
+            [OpticalDotProduct(augmented_weights[i], cfg) for i in range(self.out_features)]
+        )
+
+    def forward(self, tensor: Float[torch.Tensor, "Batch In"]):
+        # Inference only optimization
+        with torch.no_grad():
+            # Augment input tensor with ones for bias calculation
+            ones = torch.ones(tensor.shape[0], 1, device=tensor.device, dtype=tensor.dtype)
+            augmented_tensor = torch.cat([tensor.float(), ones], dim=1) # Shape: (Batch, In + 1)
+
+            # Apply each OpticalDotProduct unit to the augmented input batch
+            # Use list comprehension and torch.stack for efficiency
+            # Each dot_product(augmented_tensor) returns shape (Batch,)
+            outputs = [dot_product(augmented_tensor) for dot_product in self.optical_dots]
+
+            # Stack results along the feature dimension
+            output_tensor = torch.stack(outputs, dim=-1) # Shape: (Batch, Out)
+
+        return output_tensor

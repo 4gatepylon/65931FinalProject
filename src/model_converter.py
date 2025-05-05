@@ -212,9 +212,9 @@ class Loader:
         ds = load_dataset(dataset_paths[dataset_name], split=f"{split_names[dataset_name]}", streaming=True)
         # Limit the number of data points if specified
         if max_num_data_points > 0:
+            ds = ds.shuffle(buffer_size=10*max_num_data_points, seed=42)
             ds = ds.take(max_num_data_points)
-        # Convert to regular dataset
-
+        # Convert.
         mini_idents = ds.features['label'].names
         mini_idx_to_full_idx = {
             i: self.ident_to_full_idx[ident] for i, ident in enumerate(mini_idents)
