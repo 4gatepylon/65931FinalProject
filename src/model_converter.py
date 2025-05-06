@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from .kernels import * 
 from .configurations import *
 from tqdm import tqdm
+import timm
 import json
 
 def get_image_net_mappings():
@@ -94,7 +95,7 @@ class Loader:
         self.ident_to_full_idx, self.full_idx_to_ident = get_image_net_mappings()
         self.config = config or OpticalDotProductConfiguration()
         self.load_dataset(self.dataset_name, max_num_data_points)
-        self.load_pretrained_model(models.resnet18(pretrained=True))
+        self.load_pretrained_model(timm.create_model('deit_tiny_patch16_224', pretrained=True))
         self.make_custom_model(OpticalDotProductConfiguration())
 
 
@@ -142,9 +143,9 @@ class Loader:
 
     def load_pretrained_model(self, model):
         """
-        Loads a pretrained ResNet18 model according to the dataset.
+        Loads a pretrained DeiT-tiny model according to the dataset.
         
-        - For "mini-imagenet" or "tiny-imagenet": Uses the standard torchvision pretrained ResNet18 (on ImageNet).
+        - For "mini-imagenet" or "tiny-imagenet": Uses the standard torchvision pretrained DeiT-tiny (on ImageNet).
         """
         self.original_model = model
         self.original_model.eval()
@@ -241,7 +242,7 @@ if __name__ == "__main__":
     # Example usage
     dataset_name = "mini-imagenet"  # Change this to "tiny-imagenet" or "imagenet" as needed
     loader = Loader(dataset_name, max_num_data_points=20)
-    loader.load_pretrained_model(models.resnet18(pretrained=True))
+    loader.load_pretrained_model(timm.create_model('deit_tiny_patch16_224', pretrained=True))
     loader.make_custom_model(OpticalDotProductConfiguration.from_config_path("config/scripted/WDAC8_IDAC8_ADC8.yaml"))
 
     loader.test_model_on_dataset(custom=True)
