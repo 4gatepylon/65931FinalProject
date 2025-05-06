@@ -1,5 +1,5 @@
 from src.kernels import OpticalFC, OpticalDotProduct, OpticalDotProductConfiguration, best_device
-from src.cross_talk import make_configuration
+from src.crosstalk.cross_talk import make_configuration
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -61,7 +61,7 @@ def test_dumb_dot_product():
 
 
 def test_end_to_end():
-    from src.model_converter import Loader
+    from src.compiler.model_converter import Loader
     # Example usage
     dataset_name = "mini-imagenet"  # Change this to "tiny-imagenet" or "imagenet" as needed
     config = make_configuration(

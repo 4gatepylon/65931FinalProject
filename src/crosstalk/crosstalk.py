@@ -1,4 +1,6 @@
 """
+NOTE this was written by Amadou.
+
 Approximate cross-talk model.
 
 We will assume that:
@@ -21,17 +23,15 @@ We will apply this finesse to the new configurations we experiment with.
 So crosstalk = (N_distinct / (2 * finesse))^2
 """
 
-from .configurations import OpticalDotProductConfiguration
-from enum import StrEnum, auto
-from .utils import crosstalk_DB_to_linear
+from src.kernels.configurations import OpticalDotProductConfiguration
+from src.kernels.utils import crosstalk_DB_to_linear
 from math import pi, sqrt
 
-
-def awg_paper_finesse(adjacent_crosstalk_db: float = -34) -> float:
+PAPER_N = 63
+def awg_paper_finesse(adjacent_crosstalk_db: float = -34, N: int = PAPER_N) -> float:
     """ Approximate formula to get the finesse of the AWG in the paper. """
     crosstalk_rate = crosstalk_DB_to_linear(adjacent_crosstalk_db)
-    paper_N = 63
-    return paper_N / (2 * crosstalk_rate ** 0.5)
+    return N / (2 * crosstalk_rate ** 0.5)
 
 def mrr_paper_finesse(k_squared: float = 0.03) -> float:
     """ Approximate formula to get the finesse of the MRR in the paper. """

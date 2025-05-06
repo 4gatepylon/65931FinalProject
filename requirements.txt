@@ -4,3 +4,9 @@ pydantic
 pydantic-yaml
 numpy
 datasets
+click
+pytest
+transformers
+datasets
+dotenv
+jaxtyping

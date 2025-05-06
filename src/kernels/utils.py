@@ -29,3 +29,11 @@ def crosstalk_DB_to_linear(
        factor = 10^(L/10)
     """
     return 10 ** (dB / 10)
+
+def best_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")

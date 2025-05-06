@@ -18,8 +18,8 @@ from datasets import load_dataset  # Hugging Face Datasets library
 import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader, TensorDataset
-from .kernels import * 
-from .configurations import *
+from ..kernels import * 
+from ..kernels import *
 from tqdm import tqdm
 import json
 

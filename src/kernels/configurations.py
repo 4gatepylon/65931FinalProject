@@ -13,6 +13,9 @@ import pydantic
 from typing import Optional
 import dotenv
 
+# This should be the root i.e. parent of src then down into config
+DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config"
+
 class DACConfiguration(pydantic.BaseModel):
     quantization_bitwidth: int = 8
     voltage_min: float = 0
