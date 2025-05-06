@@ -513,6 +513,9 @@ class OpticalFC(nn.Module):
     def forward(self, tensor: Float[torch.Tensor, "Batch In"]):
         # Inference only optimization
         with torch.no_grad():
+            original_shape = tensor.shape[:-1]
+            in_features = tensor.shape[-1]
+            tensor = tensor.view(-1, in_features)
             # Augment input tensor with ones for bias calculation
             ones = torch.ones(tensor.shape[0], 1, device=tensor.device, dtype=tensor.dtype)
             augmented_tensor = torch.cat([tensor.float(), ones], dim=1) # Shape: (Batch, In + 1)
@@ -524,5 +527,6 @@ class OpticalFC(nn.Module):
 
             # Stack results along the feature dimension
             output_tensor = torch.stack(outputs, dim=-1) # Shape: (Batch, Out)
+            output_tensor = output_tensor.view(*original_shape, -1)
 
         return output_tensor
