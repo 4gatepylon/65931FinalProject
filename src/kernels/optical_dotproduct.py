@@ -30,6 +30,11 @@ from src.kernels.utils import (
 )
 
 class DAC(nn.Module):
+    """
+    Bin into a voltage range uniformly and
+    return the value in that range. This does not detract
+    any precision.
+    """
     def __init__(
         self,
         cfg: DACConfiguration,
@@ -44,9 +49,13 @@ class DAC(nn.Module):
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
         if self.is_weight:
+            # TODO(Adriano) what is the desired behavior?
+            # Shouldn't it be in the voltages?
+            assert tensor.min() >= -1.0, f"Weight tensor must be in [-1, 1], got min {tensor.min()}"
+            assert tensor.max() <= 1.0, f"Weight tensor must be in [-1, 1], got max {tensor.max()}"
             return tensor # Keep in [-1, 1]
         # Assumes input is already quantized.
-        tensor = torch.round(tensor.clamp(0, self.max_q_val)) / self.max_q_val
+        tensor = torch.round(tensor.clamp(0, self.max_q_val)).float() / self.max_q_val
         return self.voltage_min + (self.voltage_max - self.voltage_min) * tensor
 
 
@@ -64,15 +73,20 @@ class ADC(nn.Module):
 
         self.max_q_val = 2**cfg.quantization_bitwidth - 1
 
-    def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
+    def forward(self, tensor: Float[torch.Tensor, "N"], rescale_down: bool = True) -> Float[torch.Tensor, "N"]:
         """
         Simulate precision loss in ADC.
         Caused by clamping to the voltage range, then rounding for quantization.
         """
-        # Assume voltage_min is simply 0.
-        tensor = tensor.clamp(0, self.voltage_max)
-        scaling_factor = (self.max_q_val / self.voltage_max)
-        tensor = torch.round(tensor * scaling_factor) / scaling_factor
+        dv = self.voltage_max - self.voltage_min
+        tensor = tensor.clamp(self.voltage_min, self.voltage_max)
+        tensor -= self.voltage_min # if negative shift up, else shift down
+        assert tensor.min() >= 0.0, f"Min: {tensor.min()}"
+        assert tensor.max() <= dv, f"Max: {tensor.max()}"
+        scaling_factor = (self.max_q_val / dv)
+        tensor = torch.round(tensor * scaling_factor).float()
+        if rescale_down:
+            tensor = tensor / scaling_factor
         return tensor
 
 class Laser(nn.Module):
@@ -90,7 +104,10 @@ class Laser(nn.Module):
         self.awg_cross_talk_rate = cfg.awg_cross_talk_rate
         # X = X + sum(surrounding X * cross_talk_rate) 
         self.cross_talk_kernel = torch.tensor([
-           self.awg_cross_talk_rate/4, self.awg_cross_talk_rate, 1.0, self.awg_cross_talk_rate, self.awg_cross_talk_rate/4
+           self.awg_cross_talk_rate/4,
+           self.awg_cross_talk_rate, 1.0,
+           self.awg_cross_talk_rate,
+           self.awg_cross_talk_rate/4
         ], device=device).view(1, 1, -1)
 
     def forward(self, tensor: Float[torch.Tensor, "N"]) -> Float[torch.Tensor, "N"]:
