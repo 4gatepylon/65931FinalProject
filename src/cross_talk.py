@@ -70,7 +70,10 @@ def make_configuration(
     if noisy:
         config.laser_cfg.awg_cross_talk_rate = awg_cross_talk
         config.mrr_cfg.mrr_cross_talk_rate = mrr_cross_talk
-        config.name = f"n_columns_{n_columns}_n_plcus_{n_plcus}_n_bits_{n_bits}"
+        s = ""
+        if sensitive:
+            s = "_sensitive"
+        config.name = f"n_columns_{n_columns}_n_plcus_{n_plcus}_n_bits_{n_bits}{s}"
     else:
         config.laser_cfg.awg_cross_talk_rate = 0
         config.mrr_cfg.mrr_cross_talk_rate = 0
